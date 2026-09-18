@@ -54,8 +54,12 @@ public partial class App : Application
         // without creating any window or tray icon.
         if (e.Args.Any(a => string.Equals(a, "--selftest", StringComparison.OrdinalIgnoreCase)))
         {
-            Environment.ExitCode = SettingsSelfTest.Run();
-            Shutdown(Environment.ExitCode);
+            int code = SettingsSelfTest.Run();
+
+            // Exit directly rather than through Shutdown(): a WinExe returning via
+            // WPF's shutdown did not reliably propagate the exit code, so CI reported
+            // failure even though every check had passed.
+            Environment.Exit(code);
             return;
         }
 

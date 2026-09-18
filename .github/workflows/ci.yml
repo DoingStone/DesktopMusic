@@ -50,11 +50,13 @@ jobs:
         run: |
           $exe = Get-ChildItem -Recurse -Filter TaskbarLyrics.exe -Path src\TaskbarLyrics.App\bin\Release | Select-Object -First 1
           if (-not $exe) { throw "TaskbarLyrics.exe not found" }
-          & $exe.FullName --selftest
-          if ($LASTEXITCODE -ne 0) {
-            Get-Content "$env:TEMP\taskbar-lyrics-selftest.txt" -ErrorAction SilentlyContinue
-            throw "settings self-tests failed"
-          }
+
+          # Start-Process is used rather than the call operator: this is a GUI-subsystem
+          # binary, and $LASTEXITCODE is not dependable for those.
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '--selftest' -Wait -PassThru -NoNewWindow
+          Get-Content "$env:TEMP\taskbar-lyrics-selftest.txt" -ErrorAction SilentlyContinue
+
+          if ($p.ExitCode -ne 0) { throw "settings self-tests failed (exit $($p.ExitCode))" }
 
       - name: Publish (verifies packaging)
         run: >
