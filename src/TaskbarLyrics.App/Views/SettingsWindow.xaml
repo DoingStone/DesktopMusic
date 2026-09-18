@@ -1,0 +1,812 @@
+<Window x:Class="TaskbarLyrics.App.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:TaskbarLyrics.App.Controls"
+        Title="任务栏歌词 · 设置"
+        Width="600" Height="560"
+        MinWidth="540" MinHeight="460"
+        WindowStartupLocation="CenterScreen"
+        Topmost="False"
+        Background="#FFF3F3F3"
+        Foreground="#FF1A1A1A"
+        FontFamily="Microsoft YaHei UI"
+        FontSize="13"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Ideal">
+
+    <Window.Resources>
+        <!--
+          Windows 11 Settings palette.
+
+          These are solid colours on purpose. An earlier revision made the window
+          background transparent to let a Mica backdrop show through, but Mica only
+          renders when the client area has first been merged into the window frame
+          via DwmExtendFrameIntoClientArea. Without that, a transparent client area
+          simply paints black — which is exactly the black-on-white look this
+          replaces. Solid values reproduce the same design language and cannot fail
+          at runtime.
+        -->
+        <SolidColorBrush x:Key="Accent" Color="#FF0067C0" />
+        <SolidColorBrush x:Key="Fg" Color="#FF1A1A1A" />
+        <SolidColorBrush x:Key="FgMuted" Color="#FF5D5D5D" />
+        <!-- Settings page group headers are plain dark text, not accent-coloured. -->
+        <SolidColorBrush x:Key="FgHeading" Color="#FF1A1A1A" />
+        <SolidColorBrush x:Key="Line" Color="#FFE5E5E5" />
+
+        <!-- Card surface: solid white on the #F3F3F3 page, hairline border, 4 px radius. -->
+        <SolidColorBrush x:Key="Card" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="CardBorder" Color="#FFE5E5E5" />
+        <SolidColorBrush x:Key="ControlFill" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="ControlBorder" Color="#FFD6D6D6" />
+        <SolidColorBrush x:Key="ControlHover" Color="#FFF5F5F5" />
+
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+        </Style>
+
+
+        <Style TargetType="GroupBox">
+            <Setter Property="Foreground" Value="{StaticResource FgHeading}" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="Padding" Value="12,10,12,12" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GroupBox">
+                        <Border Background="{StaticResource Card}"
+                                BorderBrush="{StaticResource CardBorder}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                            <StackPanel>
+                                <TextBlock Text="{TemplateBinding Header}"
+                                           Margin="{TemplateBinding Padding}"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource FgHeading}" />
+                                <ContentPresenter Margin="12,0,12,12" />
+                            </StackPanel>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+            <Setter Property="Background" Value="{StaticResource ControlFill}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+        </Style>
+
+        <!--
+          Fluent buttons: rounded, subtle fill, hover feedback.
+
+          The template draws {TemplateBinding Background} rather than a hard-coded
+          brush. Previously it painted ControlFill unconditionally, which silently
+          discarded any Background set by a caller — that is what made the colour
+          picker's swatches all render blank white.
+        -->
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,6" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+            <Setter Property="MinWidth" Value="80" />
+            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+            <Setter Property="Background" Value="{StaticResource ControlFill}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome"
+                                CornerRadius="5"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{StaticResource ControlBorder}"
+                                BorderThickness="1">
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource ControlHover}" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="#FFB8B8B8" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#FFEFEFEF" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingLabel" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+            <Setter Property="Margin" Value="0,0,10,0" />
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+            <Setter Property="CaretBrush" Value="{StaticResource Fg}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Bd"
+                                CornerRadius="4"
+                                Background="#FFFFFFFF"
+                                BorderBrush="{StaticResource Line}"
+                                BorderThickness="1">
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          Margin="{TemplateBinding Padding}"
+                                          VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Bd" Property="BorderThickness" Value="2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+          Win11 checkbox: a 20 px rounded-square box that fills with the accent colour
+          when checked, rather than the classic small square with a tick glyph.
+        -->
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+            <Setter Property="Margin" Value="0,5" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal" Background="Transparent">
+                            <Border x:Name="Box"
+                                    Width="20" Height="20"
+                                    CornerRadius="4"
+                                    VerticalAlignment="Center"
+                                    Background="#FFFFFFFF"
+                                    BorderBrush="#FF8A8A8A"
+                                    BorderThickness="1">
+                                <Path x:Name="Tick"
+                                      Data="M 4,9 L 8,13 L 15,5"
+                                      Stroke="White"
+                                      StrokeThickness="2"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      Visibility="Collapsed" />
+                            </Border>
+                            <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Tick" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+          Win11 slider: a 4 px track with the sung portion filled in the accent colour
+          and a 20 px circular thumb, replacing the square WPF thumb.
+        -->
+        <Style TargetType="Slider">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center" Height="24">
+                            <Border Height="4" CornerRadius="2"
+                                    Background="#FFE5E5E5"
+                                    VerticalAlignment="Center" />
+                            <Track x:Name="PART_Track">
+                                <Track.Thumb>
+                                    <Thumb Width="20" Height="20" Cursor="Hand">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Grid>
+                                                    <Ellipse Fill="#FFFAFAFA"
+                                                             Stroke="#FF8A8A8A"
+                                                             StrokeThickness="1" />
+                                                    <Ellipse Fill="{StaticResource Accent}"
+                                                             Margin="6"
+                                                             x:Name="Inner" />
+                                                </Grid>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Inner" Property="Margin" Value="5" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <!--
+                                  The Track sizes the decrease portion to the thumb
+                                  position, so painting it accent gives the Win11
+                                  "filled up to the handle" look with no manual width.
+                                -->
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="4" CornerRadius="2"
+                                                        Background="{StaticResource Accent}"
+                                                        VerticalAlignment="Center" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge" Opacity="0" />
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Win11 scrollbar: thin rounded thumb, no arrow buttons. -->
+        <Style x:Key="ScrollThumb" TargetType="Thumb">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border CornerRadius="3" Background="#59000000" Margin="2,0" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ScrollBar">
+            <Setter Property="Width" Value="10" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource ScrollThumb}" />
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" />
+                                </Track.IncreaseRepeatButton>
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" />
+                                </Track.DecreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+          Win11 tabs: no boxed tab chrome. The selected tab is marked by an accent
+          underline and semibold text, which is what makes the page read as Fluent
+          rather than as classic WPF.
+        -->
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource FgMuted}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Grid>
+                            <Border x:Name="Bg" Background="Transparent" CornerRadius="5" Margin="2,0" />
+                            <ContentPresenter x:Name="Content"
+                                              ContentSource="Header"
+                                              Margin="14,8"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                            <Border x:Name="Underline"
+                                    Height="2.5"
+                                    Width="18"
+                                    CornerRadius="1.5"
+                                    Background="{StaticResource Accent}"
+                                    VerticalAlignment="Bottom"
+                                    HorizontalAlignment="Center"
+                                    Margin="0,0,0,2"
+                                    Visibility="Collapsed" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Underline" Property="Visibility" Value="Visible" />
+                                <Setter Property="Foreground" Value="{StaticResource Fg}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#FFEDEDED" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Fluent tab strip: flat, no raised border around the page content. -->
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0,6,0,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0"
+                                    BorderBrush="#FFE5E5E5"
+                                    BorderThickness="0,0,0,1">
+                                <TabPanel IsItemsHost="True" Margin="4,0" />
+                            </Border>
+                            <ContentPresenter Grid.Row="1" ContentSource="SelectedContent" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TabControl Grid.Row="0" Margin="12,12,12,0" Background="#FFFFFFFF" BorderBrush="#FFD5DAE2">
+
+            <!-- ================= 外观 ================= -->
+            <TabItem Header="外观">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                    <StackPanel>
+
+                        <GroupBox Header="字体">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="86" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="字体" Style="{StaticResource SettingLabel}" />
+                                <ComboBox x:Name="FontCombo" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2"
+                                          SelectionChanged="OnFontChanged" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="原文字号" Style="{StaticResource SettingLabel}" />
+                                <Slider x:Name="OriginalSizeSlider" Grid.Row="1" Grid.Column="1"
+                                        Minimum="8" Maximum="26" TickFrequency="0.5"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="OnSliderChanged" />
+                                <TextBlock x:Name="OriginalSizeText" Grid.Row="1" Grid.Column="2"
+                                           Width="44" TextAlignment="Right"
+                                           VerticalAlignment="Center" Foreground="#FF2563A8" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="译文字号" Style="{StaticResource SettingLabel}" />
+                                <Slider x:Name="TranslationSizeSlider" Grid.Row="2" Grid.Column="1"
+                                        Minimum="8" Maximum="24" TickFrequency="0.5"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="OnSliderChanged" />
+                                <TextBlock x:Name="TranslationSizeText" Grid.Row="2" Grid.Column="2"
+                                           Width="44" TextAlignment="Right"
+                                           VerticalAlignment="Center" Foreground="#FF2563A8" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="字重" Style="{StaticResource SettingLabel}" />
+                                <ComboBox x:Name="FontWeightCombo" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"
+                                          SelectionChanged="OnFontChanged" />
+
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="字间距" Style="{StaticResource SettingLabel}" />
+                                <Slider x:Name="LetterSpacingSlider" Grid.Row="4" Grid.Column="1"
+                                        Minimum="0" Maximum="6" TickFrequency="0.5"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="OnSliderChanged" />
+                                <TextBlock x:Name="LetterSpacingText" Grid.Row="4" Grid.Column="2"
+                                           Width="44" TextAlignment="Right"
+                                           VerticalAlignment="Center" Foreground="#FF2563A8" />
+                            </Grid>
+                        </GroupBox>
+
+                        <GroupBox Header="颜色">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="已唱高亮" Style="{StaticResource SettingLabel}" />
+                                <controls:ColorField x:Name="HighlightColorField" Grid.Row="0" Grid.Column="1"
+                                                     Margin="0,3" ColorChanged="OnColorChanged" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="未唱文字" Style="{StaticResource SettingLabel}" />
+                                <controls:ColorField x:Name="BaseColorField" Grid.Row="1" Grid.Column="1"
+                                                     Margin="0,3" ColorChanged="OnColorChanged" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="下一行预览" Style="{StaticResource SettingLabel}" />
+                                <controls:ColorField x:Name="ContextColorField" Grid.Row="2" Grid.Column="1"
+                                                     Margin="0,3" ColorChanged="OnColorChanged" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="背景板" Style="{StaticResource SettingLabel}" />
+                                <controls:ColorField x:Name="BackgroundColorField" Grid.Row="3" Grid.Column="1"
+                                                     Margin="0,3" ColorChanged="OnColorChanged" />
+                            </Grid>
+                        </GroupBox>
+
+                        <GroupBox Header="背景板与高亮">
+                            <StackPanel>
+                                <CheckBox x:Name="ShowBackgroundCheck" Content="显示背景板（提升浅色任务栏下的可读性）"
+                                          Click="OnOptionChanged" />
+
+                                <Grid Margin="0,4,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="110" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="圆角" Style="{StaticResource SettingLabel}" />
+                                    <Slider x:Name="CornerSlider" Grid.Column="1"
+                                            Minimum="0" Maximum="20" TickFrequency="1"
+                                            IsSnapToTickEnabled="True"
+                                            VerticalAlignment="Center"
+                                            ValueChanged="OnSliderChanged" />
+                                    <TextBlock x:Name="CornerText" Grid.Column="2" Width="44"
+                                               TextAlignment="Right" VerticalAlignment="Center"
+                                               Foreground="#FF2563A8" />
+                                </Grid>
+
+                                <CheckBox x:Name="WordHighlightCheck" Content="逐字高亮（按演唱进度推进）"
+                                          Click="OnOptionChanged" />
+                                <CheckBox x:Name="ShowTranslationCheck" Content="显示翻译行"
+                                          Click="OnOptionChanged" />
+                                <CheckBox x:Name="ShowContextCheck" Content="显示下一行预览"
+                                          Click="OnOptionChanged" />
+                            </StackPanel>
+                        </GroupBox>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ================= 位置 ================= -->
+            <TabItem Header="位置与显示">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                    <StackPanel>
+
+                        <GroupBox Header="尺寸与位置">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="宽度" Style="{StaticResource SettingLabel}" />
+                                <Slider x:Name="WidthSlider" Grid.Row="0" Grid.Column="1"
+                                        Minimum="160" Maximum="1400" TickFrequency="10"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="OnSliderChanged" />
+                                <TextBlock x:Name="WidthText" Grid.Row="0" Grid.Column="2" Width="58"
+                                           TextAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="#FF2563A8" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="高度" Style="{StaticResource SettingLabel}" />
+                                <Slider x:Name="HeightSlider" Grid.Row="1" Grid.Column="1"
+                                        Minimum="0" Maximum="80" TickFrequency="2"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="OnSliderChanged"
+                                        ToolTip="0 = 自动适应任务栏高度" />
+                                <TextBlock x:Name="HeightText" Grid.Row="1" Grid.Column="2" Width="58"
+                                           TextAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="#FF2563A8" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="垂直对齐" Style="{StaticResource SettingLabel}" />
+                                <Slider x:Name="VerticalAlignSlider" Grid.Row="2" Grid.Column="1"
+                                        Minimum="-1" Maximum="1" TickFrequency="0.1"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="OnSliderChanged"
+                                        ToolTip="相对任务栏高度上下微调" />
+                                <TextBlock x:Name="VerticalAlignText" Grid.Row="2" Grid.Column="2" Width="58"
+                                           TextAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="#FF2563A8" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="水平偏移" Style="{StaticResource SettingLabel}" />
+                                <!--
+                                  Range deliberately wider than any real screen so a
+                                  long drag is never clamped by the slider and then
+                                  written back as a smaller value on the next edit.
+                                -->
+                                <Slider x:Name="OffsetXSlider" Grid.Row="3" Grid.Column="1"
+                                        Minimum="-4000" Maximum="4000" TickFrequency="10"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="OnSliderChanged" />
+                                <TextBlock x:Name="OffsetXText" Grid.Row="3" Grid.Column="2" Width="58"
+                                           TextAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="#FF0067C0" />
+
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="垂直偏移" Style="{StaticResource SettingLabel}" />
+                                <Slider x:Name="OffsetYSlider" Grid.Row="4" Grid.Column="1"
+                                        Minimum="-200" Maximum="200" TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="OnSliderChanged" />
+                                <TextBlock x:Name="OffsetYText" Grid.Row="4" Grid.Column="2" Width="58"
+                                           TextAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="#FF0067C0" />
+                            </Grid>
+                        </GroupBox>
+
+                        <GroupBox Header="透明度">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="整体不透明度" Style="{StaticResource SettingLabel}" />
+                                <Slider x:Name="OpacitySlider" Grid.Column="1"
+                                        Minimum="0.15" Maximum="1" TickFrequency="0.05"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="OnSliderChanged" />
+                                <TextBlock x:Name="OpacityText" Grid.Column="2" Width="58"
+                                           TextAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="#FF2563A8" />
+                            </Grid>
+                        </GroupBox>
+
+                        <GroupBox Header="微调位置">
+                            <StackPanel>
+                                <TextBlock Text="歌词条可直接用鼠标拖动（需开启上方「歌词可拖动」）；也可用下面的按钮精确微调。"
+                                           Foreground="#FF6B7280" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap" />
+                                <UniformGrid Columns="4">
+                                    <Button Content="← 左移" Click="OnMoveLeft" />
+                                    <Button Content="右移 →" Click="OnMoveRight" />
+                                    <Button Content="↑ 上移" Click="OnMoveUp" />
+                                    <Button Content="↓ 下移" Click="OnMoveDown" />
+                                </UniformGrid>
+                                <Button Content="恢复默认位置与宽度" Click="OnResetPosition"
+                                        Margin="0,8,0,0" HorizontalAlignment="Left" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="行为">
+                            <StackPanel>
+                                <CheckBox x:Name="InteractiveCheck"
+                                          Content="歌词可拖动 / 可点击（关闭则整条点击穿透）"
+                                          Click="OnOptionChanged" />
+                                <CheckBox x:Name="PlaceAboveCheck"
+                                          Content="浮在任务栏上方（彻底消除闪烁，代价是不在任务栏内）"
+                                          Click="OnOptionChanged" />
+                                <CheckBox x:Name="TransportControlsCheck"
+                                          Content="在歌词条内显示播放控制按钮（上一首 / 暂停 / 下一首）"
+                                          Click="OnOptionChanged" />
+                                <CheckBox x:Name="SongProgressCheck"
+                                          Content="显示歌曲进度（播放按键下方）"
+                                          Click="OnOptionChanged" />
+                                <CheckBox x:Name="VisibleCheck" Content="在任务栏显示歌词"
+                                          Click="OnOptionChanged" />
+                                <CheckBox x:Name="ShowWhenPausedCheck" Content="暂停时仍然显示"
+                                          Click="OnOptionChanged" />
+                                <CheckBox x:Name="HideWhenNoLyricsCheck" Content="找不到歌词时隐藏"
+                                          Click="OnOptionChanged" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="歌词同步微调">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="偏移（毫秒）" Style="{StaticResource SettingLabel}" />
+                                <Slider x:Name="OffsetSlider" Grid.Column="1"
+                                        Minimum="-5000" Maximum="5000" TickFrequency="50"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="OnSliderChanged" />
+                                <TextBlock x:Name="OffsetText" Grid.Column="2" Width="70"
+                                           TextAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="#FF2563A8" />
+                            </Grid>
+                        </GroupBox>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ================= 歌词来源 ================= -->
+            <TabItem Header="歌词来源">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                    <StackPanel>
+
+                        <GroupBox Header="在线歌词来源">
+                            <StackPanel>
+                                <TextBlock Text="多个来源会并发检索，再按标题、歌手、时长打分择优。"
+                                           Foreground="#FF6B7280" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,0,0,6" />
+                                <CheckBox x:Name="QqMusicCheck" Content="QQ音乐（中文曲库最全）"
+                                          Click="OnProviderChanged" />
+                                <CheckBox x:Name="NetEaseCheck" Content="网易云音乐（补充曲库与翻译）"
+                                          Click="OnProviderChanged" />
+                                <CheckBox x:Name="LrclibCheck" Content="LRCLIB（欧美曲库，开放数据库）"
+                                          Click="OnProviderChanged" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="缓存与匹配">
+                            <StackPanel>
+                                <TextBlock Text="换歌后歌词不正确时，可先「重新匹配」；仍不对则清空缓存再试。"
+                                           Foreground="#FF6B7280" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,0,0,6" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="重新匹配当前歌曲" Click="OnRematch" Margin="0" />
+                                    <Button Content="清空歌词缓存" Click="OnClearCache" />
+                                </StackPanel>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="诊断">
+                            <StackPanel>
+                                <TextBlock Text="用于排查问题：显示当前曲目、各歌词源命中与歌词匹配结果。"
+                                           Foreground="#FF6B7280" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,0,0,6" />
+                                <Button Content="查看当前歌词匹配详情" Click="OnShowDiagnostics"
+                                        HorizontalAlignment="Left" Margin="0" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <TextBlock Text="提示：修改后点「保存」写入配置文件；「取消」会恢复打开设置前的状态。"
+                                   Foreground="#FF6B7280" FontSize="11" TextWrapping="Wrap" Margin="2,0,0,8" />
+                        <TextBlock x:Name="ConfigPathText"
+                                   Foreground="#FF2563A8" FontSize="11"
+                                   TextWrapping="Wrap" />
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ================= 播放控制 ================= -->
+            <TabItem Header="播放控制">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                    <StackPanel>
+
+                        <GroupBox Header="立即控制当前播放器">
+                            <StackPanel>
+                                <TextBlock Text="命令会发送给正在为歌词提供播放信息的那个播放器。若播放器未开放相应控件，按钮会提示不支持。"
+                                           Foreground="#FF6B7280" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,0,0,8" />
+                                <UniformGrid Columns="3">
+                                    <Button Content="⏮  上一首" Click="OnTransportPrevious" />
+                                    <Button Content="⏯  暂停/播放" Click="OnTransportPlayPause" />
+                                    <Button Content="⏭  下一首" Click="OnTransportNext" />
+                                </UniformGrid>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="全局快捷键">
+                            <StackPanel>
+                                <TextBlock Text="快捷键在系统范围内生效，因此不必让歌词框接收鼠标点击。留空即可关闭某一项。格式示例：Ctrl+Alt+Space、Ctrl+Alt+Right。"
+                                           Foreground="#FF6B7280" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,0,0,8" />
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="暂停 / 播放" Style="{StaticResource SettingLabel}" />
+                                    <TextBox x:Name="HotkeyPlayPauseBox" Grid.Row="0" Grid.Column="1"
+                                             Margin="0,3" TextChanged="OnHotkeyTextChanged" />
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="下一首" Style="{StaticResource SettingLabel}" />
+                                    <TextBox x:Name="HotkeyNextBox" Grid.Row="1" Grid.Column="1"
+                                             Margin="0,3" TextChanged="OnHotkeyTextChanged" />
+
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="上一首" Style="{StaticResource SettingLabel}" />
+                                    <TextBox x:Name="HotkeyPreviousBox" Grid.Row="2" Grid.Column="1"
+                                             Margin="0,3" TextChanged="OnHotkeyTextChanged" />
+
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="显示 / 隐藏歌词" Style="{StaticResource SettingLabel}" />
+                                    <TextBox x:Name="HotkeyToggleBox" Grid.Row="3" Grid.Column="1"
+                                             Margin="0,3" TextChanged="OnHotkeyTextChanged" />
+                                </Grid>
+
+                                <TextBlock x:Name="HotkeyStatusText"
+                                           Foreground="#FF2563A8" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,8,0,0" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="拖动说明">
+                            <TextBlock Text="在「位置与显示」中关闭「锁定位置」后，即可直接用鼠标拖动任务栏上的歌词框来调整位置；位置会自动保存。重新开启锁定后恢复点击穿透，不会挡住任务栏操作。"
+                                       Foreground="#FF6B7280" FontSize="11" TextWrapping="Wrap" />
+                        </GroupBox>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <!-- Footer -->
+        <Grid Grid.Row="1" Margin="12,10,12,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="0" x:Name="ResetButton" Content="恢复默认设置"
+                    Click="OnRestoreDefaults" Margin="0" MinWidth="120" />
+
+            <TextBlock x:Name="StatusText" Grid.Column="1"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Center"
+                       TextTrimming="CharacterEllipsis"
+                       Foreground="#FF1E874B" />
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button x:Name="QuitButton" Content="退出程序"
+                        Click="OnQuit"
+                        ToolTip="关闭任务栏歌词并退出" />
+                <Button x:Name="CloseButton" Content="关闭"
+                        Click="OnCloseWindow"
+                        IsCancel="True"
+                        ToolTip="收起本窗口，歌词继续显示（设置已保存）" />
+                <Button x:Name="SaveButton" Content="保存"
+                        Click="OnSave"
+                        IsDefault="True"
+                        ToolTip="保存设置但不关闭窗口" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

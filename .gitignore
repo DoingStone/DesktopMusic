@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+.vs/
+
+# Published binaries are distributed as release assets, not committed:
+# a self-contained build is ~25 MB and would bloat the repository.
+publish/
+
+# Locally generated verification screenshots and capture dumps
+artifacts/
+
+# Tooling caches
+*.binlog
+*.log
+TestResults/

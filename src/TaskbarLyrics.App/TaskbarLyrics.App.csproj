@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>TaskbarLyrics.App</RootNamespace>
+    <AssemblyName>TaskbarLyrics</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\TaskbarLyrics.ico</ApplicationIcon>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TaskbarLyrics.Core\TaskbarLyrics.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Needed only to turn the embedded PNG into an HICON for the notification
+      area. Added explicitly instead of via UseWindowsForms, which would drag in
+      the whole WinForms stack.
+    -->
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Master icon artwork, embedded rather than shipped as a loose file so the
+      tray icon and the executable icon cannot drift apart.
+    -->
+    <EmbeddedResource Include="Assets\AppIcon.png" LogicalName="TaskbarLyrics.AppIcon.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      IconSource.png is a build-time input for TaskbarLyrics.IconGen. Excluded so it
+      is neither compiled into the assembly nor copied to the published output.
+      (A WPF project would otherwise treat a loose .png as a Resource.)
+    -->
+    <None Remove="Assets\IconSource.png" />
+    <Resource Remove="Assets\IconSource.png" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    One-shot asset generator for the application icon.
+
+    Kept in the repository so the icon artwork is reproducible and reviewable as
+    code rather than an opaque binary. Not part of the shipped application.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>icongen</AssemblyName>
+    <RootNamespace>TaskbarLyrics.IconGen</RootNamespace>
+  </PropertyGroup>
+
+</Project>
