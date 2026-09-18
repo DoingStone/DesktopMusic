@@ -155,6 +155,78 @@ public static class NativeMethods
 
     private const uint GW_HWNDPREV = 3;
 
+    private const uint GW_OWNER = 4;
+
+    /// <summary>Index of a top-level window's owner.</summary>
+    private const int GWLP_HWNDPARENT = -8;
+
+    /// <summary>
+    /// Make <paramref name="owner"/> the owner of <paramref name="window"/>.
+    /// <para>
+    /// Windows guarantees an owned window is always above its owner, so with the
+    /// taskbar as owner the overlay cannot be painted over when Explorer re-raises
+    /// <c>Shell_TrayWnd</c> — the mechanism behind both the flicker and the lyrics
+    /// vanishing while the Start menu is open.
+    /// </para>
+    /// <para>
+    /// This sets the <b>owner</b>, not the parent, so the window stays top-level and
+    /// WPF's coordinate handling is unaffected. (Reparenting a WPF window with
+    /// <c>SetParent</c> puts it thousands of pixels off screen — verified earlier.)
+    /// </para>
+    /// </summary>
+    internal static bool SetOwner(IntPtr window, IntPtr owner, out string detail)
+    {
+        detail = "not attempted";
+
+        if (window == IntPtr.Zero || owner == IntPtr.Zero)
+        {
+            detail = $"invalid handles window=0x{window.ToInt64():X} owner=0x{owner.ToInt64():X}";
+            return false;
+        }
+
+        var existing = GetWindowOwner(window);
+        if (existing == owner)
+        {
+            detail = "already owned";
+            return true;
+        }
+
+        SetWindowLongPtr(window, GWLP_HWNDPARENT, owner);
+        int err = Marshal.GetLastWin32Error();
+
+        var after = GetWindowOwner(window);
+        detail = $"prev=0x{existing.ToInt64():X} winerr={err} after=0x{after.ToInt64():X}";
+        return after == owner;
+    }
+
+    /// <summary>Drop the owner relationship.</summary>
+    internal static void ClearOwner(IntPtr window)
+    {
+        if (window == IntPtr.Zero) return;
+        SetWindowLongPtr(window, GWLP_HWNDPARENT, IntPtr.Zero);
+    }
+
+    /// <summary>
+    /// Read a top-level window's owner, via the documented <c>GetWindow(GW_OWNER)</c>
+    /// query rather than reading GWLP_HWNDPARENT back.
+    /// </summary>
+    internal static IntPtr GetWindowOwner(IntPtr window) =>
+        window == IntPtr.Zero ? IntPtr.Zero : GetWindow(window, GW_OWNER);
+
+    // SetWindowLongPtr exists only on 64-bit Windows; 32-bit builds fall back to
+    // SetWindowLong. Both take a pointer-sized value at GWLP_HWNDPARENT.
+    private static void SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value)
+    {
+        if (IntPtr.Size == 8) SetWindowLongPtr64(hWnd, index, value);
+        else SetWindowLong32(hWnd, index, value.ToInt32());
+    }
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
+    private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
     /// <summary>Clear the WS_EX_TOPMOST flag from a window (for settings dialog). </summary>
     internal static void ClearTopmost(Window window)
     {

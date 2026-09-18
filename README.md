@@ -1,5 +1,8 @@
 # TaskbarLyrics · QQ音乐任务栏歌词
 
+[![CI](https://github.com/DoingStone/DesktopMusic/actions/workflows/ci.yml/badge.svg)](https://github.com/DoingStone/DesktopMusic/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 在 Windows 任务栏的空白区域（时钟左侧）实时显示 **QQ音乐** 当前播放的歌词：双行显示、逐字高亮、支持翻译、可拖动调整位置。
 
 本项目为**自研实现**，零第三方依赖（只用 .NET 8 + WPF），歌词匹配与解析思路参考了 [TaskbarLyrics](https://github.com/ANYNC/TaskbarLyrics) 与 [Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper)。
@@ -7,6 +10,14 @@
 ---
 
 ## 效果
+
+任务栏中的实际效果 —— 左侧为播放控制与歌曲进度，右侧为逐字高亮的歌词：
+
+![任务栏歌词](docs/overlay.png)
+
+设置界面（Win11 设置页风格）：
+
+![设置界面](docs/settings.png)
 
 任务栏中实时渲染当前歌词行，已唱部分按演唱进度用高亮色「刷」过去：
 
@@ -18,10 +29,12 @@
 ```
 
 - **逐字高亮**：当前行按演唱进度逐字推进，而不是整行闪烁
+- **歌曲进度**：播放按键下方显示进度条与 `当前时间 / 总时长`
 - **翻译行**：有翻译时在原文下方联动显示
 - **下一行预览**：提前显示即将演唱的歌词
 - **点击穿透**：锁定状态下完全不挡任务栏操作
 - **可拖动**：解锁后可直接拖到任意位置，位置自动记忆
+- **超长行滚动**：文字宽度超出可用区域时改为跑马灯滚动，不会与播放按键重叠
 
 ---
 
@@ -375,3 +388,18 @@ powershell -ExecutionPolicy Bypass -File tools\qq-musicu-lyric.ps1
 - [LRCLIB](https://lrclib.net) — 开放歌词数据库
 
 本项目为独立实现，代码原创。歌词内容版权归各音乐平台与版权方所有，本工具仅用于本地播放时的辅助显示。
+
+---
+
+## 许可证
+
+[MIT](LICENSE) © 2026 DoingStone
+
+## 持续集成
+
+GitHub Actions 在每次提交时执行（见 `.github/workflows/ci.yml`）：
+
+1. `dotnet build -c Release`
+2. 引擎自检 `tblc selftest`（歌词解析、版本匹配、URI 构建、人声时长、位置外推）
+3. 设置自检 `TaskbarLyrics.exe --selftest`（设置持久化 + 色板离屏渲染）
+4. `dotnet publish` 验证打包，并上传构建产物

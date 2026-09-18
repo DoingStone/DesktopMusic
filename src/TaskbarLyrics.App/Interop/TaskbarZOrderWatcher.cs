@@ -39,6 +39,20 @@ internal sealed class TaskbarZOrderWatcher : IDisposable
     private IntPtr _reorderHook;
     private bool _disposed;
 
+    private IntPtr _taskbar;
+    private DateTime _taskbarResolvedAt = DateTime.MinValue;
+
+    /// <summary>How long a resolved taskbar handle is trusted.</summary>
+    private static readonly TimeSpan TaskbarCacheFor = TimeSpan.FromSeconds(2);
+
+    private const uint GA_ROOT = 2;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
     public void Start()
     {
         if (_disposed || _callback is not null) return;
@@ -82,12 +96,44 @@ internal sealed class TaskbarZOrderWatcher : IDisposable
                 return;
             }
 
+            // Only events about the taskbar itself can raise it above us. Without this
+            // filter EVENT_OBJECT_REORDER fires for every window in the system and the
+            // guard is woken continuously — measured at ~1 % of a core for a tray
+            // utility that is meant to sit idle.
+            //
+            // Foreground changes are the exception: they are infrequent and are exactly
+            // what happens when the Start menu opens, whose host window is not rooted at
+            // the taskbar but still causes the taskbar to be raised over us.
+            bool isForegroundChange = eventType == EVENT_SYSTEM_FOREGROUND;
+
+            if (!isForegroundChange && !IsTaskbar(hwnd)) return;
+
             TaskbarRaised?.Invoke();
         }
         catch
         {
             // A hook callback must never throw into the OS.
         }
+    }
+
+    /// <summary>Whether this handle is the taskbar or one of its own windows.</summary>
+    private bool IsTaskbar(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+
+        // Cached: this runs on every hook callback, so re-resolving each time would
+        // walk the window list.
+        if (_taskbar == IntPtr.Zero || DateTime.UtcNow - _taskbarResolvedAt > TaskbarCacheFor)
+        {
+            _taskbar = FindWindow("Shell_TrayWnd", null);
+            _taskbarResolvedAt = DateTime.UtcNow;
+        }
+
+        if (_taskbar == IntPtr.Zero) return false;
+        if (hwnd == _taskbar) return true;
+
+        // Flyouts and the Start host are raised together with the taskbar.
+        return GetAncestor(hwnd, GA_ROOT) == _taskbar;
     }
 
     public void Dispose()

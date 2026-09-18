@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build-and-test:
+    # The app targets net8.0-windows and uses WPF plus Win32 interop, so it only
+    # builds on Windows.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore TaskbarLyrics.sln
+
+      - name: Build (Release)
+        run: dotnet build TaskbarLyrics.sln -c Release --no-restore
+
+      # Engine tests: lyric parsing, version matching, URI building, the vocal-span
+      # estimate and playback-position extrapolation. Pure logic, no desktop needed,
+      # so this is the authoritative gate.
+      - name: Engine self-tests
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter tblc.exe -Path src\TaskbarLyrics.Cli\bin\Release | Select-Object -First 1
+          if (-not $exe) { throw "tblc.exe not found" }
+          & $exe.FullName selftest
+          if ($LASTEXITCODE -ne 0) { throw "engine self-tests failed" }
+
+      # Settings persistence plus an off-screen render of the colour-picker palette.
+      # This needs a Windows session for WPF, which the runner provides.
+      - name: Settings self-tests
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter TaskbarLyrics.exe -Path src\TaskbarLyrics.App\bin\Release | Select-Object -First 1
+          if (-not $exe) { throw "TaskbarLyrics.exe not found" }
+          & $exe.FullName --selftest
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content "$env:TEMP\taskbar-lyrics-selftest.txt" -ErrorAction SilentlyContinue
+            throw "settings self-tests failed"
+          }
+
+      - name: Publish (verifies packaging)
+        run: >
+          dotnet publish src/TaskbarLyrics.App/TaskbarLyrics.App.csproj
+          -c Release -r win-x64 --self-contained false
+          -p:PublishSingleFile=false -o publish-check
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: TaskbarLyrics-win-x64
+          path: publish-check/
+          if-no-files-found: error

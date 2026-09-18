@@ -48,6 +48,9 @@ public partial class OverlayWindow : Window
     /// </summary>
     private bool _ownedByTaskbar;
 
+    /// <summary>Off-UI-thread Z-order guard (see TaskbarOcclusionGuard).</summary>
+    private TaskbarOcclusionGuard? _occlusionGuard;
+
 
 
     /// <summary>Event-driven trigger for Z-order recovery (see TaskbarZOrderWatcher).</summary>
@@ -97,6 +100,17 @@ public partial class OverlayWindow : Window
         MouseLeftButtonDown += OnMouseLeftButtonDown;
         MouseMove += OnMouseMove;
         MouseLeftButtonUp += OnMouseLeftButtonUp;
+
+        // Release the Win32 hook and the guard thread with the window, so neither
+        // keeps running (or keeps a delegate alive) after the overlay is gone.
+        Closed += (_, _) =>
+        {
+            _occlusionGuard?.Dispose();
+            _occlusionGuard = null;
+
+            _zOrderWatcher?.Dispose();
+            _zOrderWatcher = null;
+        };
     }
 
     /// <summary>Raised when a transport button is pressed.</summary>
@@ -134,9 +148,14 @@ public partial class OverlayWindow : Window
         TrySetTaskbarAsOwner();
         PlaceOverWindow();
 
-        // Event-driven Z-order recovery. Polling alone left the lyrics covered for up
-        // to ~190 ms per taskbar click (measured), which is plainly visible; reacting
-        // to the taskbar's own activation event recovers in about one frame.
+        // Re-assert from a dedicated thread. Marshalling through the dispatcher put the
+        // recovery behind whatever WPF was rendering, measured as the lyrics staying
+        // covered for ~150 ms after the taskbar came forward.
+        _occlusionGuard = new TaskbarOcclusionGuard(new WindowInteropHelper(this).Handle);
+        _occlusionGuard.Start();
+
+        // Event-driven Z-order recovery: the guard handles the common case, and this
+        // covers the taskbar raising itself without becoming our immediate neighbour.
         _zOrderWatcher = new TaskbarZOrderWatcher();
         _zOrderWatcher.TaskbarRaised += OnTaskbarRaised;
         _zOrderWatcher.Start();
@@ -150,6 +169,10 @@ public partial class OverlayWindow : Window
     {
         try
         {
+            // First, and on this thread: waking the guard is a single signal, so the
+            // re-assert happens immediately instead of queuing behind WPF's rendering.
+            _occlusionGuard?.Notify();
+
             if (Dispatcher.HasShutdownStarted) return;
 
             Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(() =>
@@ -195,20 +218,50 @@ public partial class OverlayWindow : Window
     }
 
     /// <summary>
-    /// Ownership by the taskbar is <b>not</b> used.
+    /// Make the taskbar this window's owner so Windows itself keeps us above it.
     /// <para>
-    /// The idea was to let Windows itself keep the overlay above the taskbar (an
-    /// owned window is always above its owner), which would remove the Z-order race
-    /// at its source. It was implemented via
-    /// <c>SetWindowLongPtr(GWLP_HWNDPARENT)</c> and measured to fail: the owner was
-    /// never actually applied, confirmed both by reading it back and by
-    /// <c>GetWindow(GW_OWNER)</c>. The mitigation below (event-driven re-assert) is
-    /// therefore what keeps the overlay on top.
+    /// An owned window is always above its owner, so this removes the Z-order race
+    /// instead of trying to win it. Re-applied on the reposition timer because
+    /// Explorer can restart and recreate <c>Shell_TrayWnd</c>, and because WPF can
+    /// reset the owner while it finishes setting the window up.
     /// </para>
     /// </summary>
     private void TrySetTaskbarAsOwner()
     {
-        _ownedByTaskbar = false;
+        // Escape hatch for A/B measurement: lets the same binary be run with and
+        // without the owner relationship so its effect can be attributed rather than
+        // assumed.
+        if (Environment.GetEnvironmentVariable("TBL_NO_OWNER") == "1")
+        {
+            _ownedByTaskbar = false;
+            return;
+        }
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            Diag.Log("[overlay] owner: window handle not ready");
+            return;
+        }
+
+        var taskbar = NativeMethods.FindWindow("Shell_TrayWnd", null);
+        if (taskbar == IntPtr.Zero)
+        {
+            Diag.Log("[overlay] owner: Shell_TrayWnd not found");
+            return;
+        }
+
+        bool ok = NativeMethods.SetOwner(handle, taskbar, out var detail);
+
+        // Log failures every time, and successes only on change, so the log shows
+        // both whether it ever took and whether something reverts it.
+        if (!ok || ok != _ownedByTaskbar)
+        {
+            Diag.Log($"[overlay] owner window=0x{handle.ToInt64():X} " +
+                     $"taskbar=0x{taskbar.ToInt64():X} ok={ok} ({detail})");
+        }
+
+        _ownedByTaskbar = ok;
     }
 
     private const int WM_NCHITTEST = 0x0084;
@@ -381,8 +434,7 @@ public partial class OverlayWindow : Window
     {
         if (!IsVisible) return;
 
-        // Owned by the taskbar: Windows keeps us above it, so there is no race.
-        if (_ownedByTaskbar) return;
+
 
         try
         {
@@ -693,11 +745,6 @@ public partial class OverlayWindow : Window
             TransparencyMode.ApplyColorKey(this, _settings.BackgroundCornerRadius);
         }
 
-        if (_ownedByTaskbar)
-        {
-            // Ownership already orders us above the taskbar; nothing to re-assert.
-            return;
-        }
 
         // Insert above the taskbar gently rather than jumping to HWND_TOPMOST,
         // which would fight the taskbar's own Z-order re-assertions.
@@ -717,10 +764,10 @@ public partial class OverlayWindow : Window
     /// </summary>
     public void Render(LyricDocument? document, TimeSpan position, bool isPlaying)
     {
-        // Z-order guard. Skipped once the taskbar owns us: Windows then guarantees we
-        // stay above it, so re-asserting would only risk the raise/lower churn that
-        // caused the flicker.
-        if (!_ownedByTaskbar &&
+        // Z-order guard. Runs regardless of ownership: the owner relationship is
+        // best-effort (Windows clears it again after a few seconds), so it must never
+        // be what stands between us and being repainted.
+        if (
             Environment.TickCount64 - _lastTopmostCheckMs >= TopmostCheckIntervalMs)
         {
             _lastTopmostCheckMs = Environment.TickCount64;
