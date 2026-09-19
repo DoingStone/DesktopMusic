@@ -131,7 +131,9 @@ internal static class FluentChrome
             window.Background = new SolidColorBrush(solid);
         }
 
-        ApplyPalette(window, dark ? Dark : Light, mica);
+        // Tooltips are opaque: a translucent one over Mica reads as a smudge.
+        var tooltipBg = dark ? Color.FromRgb(0x2B, 0x2B, 0x2B) : Color.FromRgb(0xF9, 0xF9, 0xF9);
+        ApplyPalette(window, dark ? Dark : Light, mica, tooltipBg);
 
         Diag.Log($"[fluent] theme={(dark ? "dark" : "light")} requested={theme} mica={mica}");
     }
@@ -191,7 +193,7 @@ internal static class FluentChrome
     /// the translucent values are flattened onto their solid equivalents so the window
     /// is opaque and correct rather than showing the desktop through it.
     /// </summary>
-    private static void ApplyPalette(Window window, Palette p, bool mica)
+    private static void ApplyPalette(Window window, Palette p, bool mica, Color tooltipBg)
     {
         var resources = window.Resources;
 
@@ -220,6 +222,7 @@ internal static class FluentChrome
         Set("NavBg", mica ? p.NavBg : Blend(p.WindowBg, p.NavBg));
         Set("NavItemFg", p.NavItemFg);
         Set("NavItemHover", p.NavItemHover);
+        Set("TooltipBg", tooltipBg);
     }
 
     /// <summary>Flatten a translucent tint onto an opaque base.</summary>

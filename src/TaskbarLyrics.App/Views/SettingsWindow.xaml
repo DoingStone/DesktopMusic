@@ -71,6 +71,9 @@
         <SolidColorBrush x:Key="NavItemFg" Color="#FF1A1A1A" />
         <SolidColorBrush x:Key="NavItemHover" Color="#14000000" />
 
+        <!-- Tooltip surface: opaque so it reads over Mica and over content alike. -->
+        <SolidColorBrush x:Key="TooltipBg" Color="#FFF9F9F9" />
+
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource Fg}" />
         </Style>
@@ -245,8 +248,9 @@
         </Style>
 
         <!--
-          Window caption buttons, sized and spaced like the system ones and drawn with
-          the Segoe Fluent/MDL2 glyphs. The close button takes the standard red hover.
+          Window caption buttons: glyphs only, with no persistent chrome, as the reference
+          draws them. The hover fill is deliberately faint - a heavier block reads as a
+          stray rectangle sitting in the corner rather than as part of the caption.
         -->
         <Style x:Key="CaptionButton" TargetType="Button">
             <Setter Property="Width" Value="46" />
@@ -266,12 +270,62 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="#14000000" />
+                                <Setter TargetName="Chrome" Property="Background" Value="#0F000000" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="#22000000" />
+                                <Setter TargetName="Chrome" Property="Background" Value="#1A000000" />
                             </Trigger>
                         </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+          Close keeps the system's red hover, so the destructive action is unmistakable.
+          The comment above this style previously claimed it did; it did not.
+        -->
+        <Style x:Key="CloseCaptionButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome" Background="Transparent">
+                            <ContentPresenter x:Name="Glyph"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#C42B1C" />
+                                <Setter TargetName="Glyph" Property="TextElement.Foreground" Value="White" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#B02418" />
+                                <Setter TargetName="Glyph" Property="TextElement.Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+          Win11 tooltip: rounded, low contrast, no hard outline. The stock WPF tooltip is a
+          white box with a grey border, which is what makes hovering a caption button look
+          like a stray dialog.
+        -->
+        <Style TargetType="ToolTip">
+            <Setter Property="Foreground" Value="{DynamicResource Fg}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border CornerRadius="4"
+                                Background="{DynamicResource TooltipBg}"
+                                BorderBrush="{DynamicResource CardBorder}"
+                                BorderThickness="1"
+                                Padding="9,5">
+                            <ContentPresenter />
+                        </Border>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -528,19 +582,15 @@
         <Border Grid.Row="0" Background="{DynamicResource NavBg}" />
         <Border x:Name="TitleFiller" Grid.Row="0" Background="{DynamicResource ContentBg}" Margin="232,0,0,0" />
 
-        <Button x:Name="NavToggleButton"
-                Grid.Row="0"
-                HorizontalAlignment="Left" VerticalAlignment="Center"
-                Margin="8,0,0,0"
-                Content="&#xE700;"
-                Click="OnToggleNav"
-                ToolTip="收起 / 展开左侧栏"
-                Style="{StaticResource CaptionButton}"
-                Width="40"
-                WindowChrome.IsHitTestVisibleInChrome="True" />
-
-        <StackPanel Grid.Row="0" Orientation="Horizontal"
-                    Margin="54,0,0,0" VerticalAlignment="Center">
+        <!--
+          The reference keeps the collapse control at the navigation pane's right edge,
+          so the identity sits flush at 18 px and the toggle is pushed to 232. There is
+          no hamburger at the window's far left, and its absence is what lets the app name
+          line up with the navigation items below it.
+        -->
+        <StackPanel x:Name="TitleIdentity"
+                    Grid.Row="0" Orientation="Horizontal"
+                    Margin="18,0,0,0" VerticalAlignment="Center">
             <Image x:Name="AppIconImage" Width="20" Height="20"
                    RenderOptions.BitmapScalingMode="HighQuality" />
             <TextBlock Text="任务栏歌词"
@@ -549,15 +599,25 @@
                        Foreground="{DynamicResource Fg}" />
         </StackPanel>
 
+        <Button x:Name="NavToggleButton"
+                Grid.Row="0"
+                HorizontalAlignment="Left" VerticalAlignment="Center"
+                Margin="196,0,0,0"
+                Content="&#xE700;"
+                Click="OnToggleNav"
+                Style="{StaticResource CaptionButton}"
+                Width="32"
+                WindowChrome.IsHitTestVisibleInChrome="True" />
+
         <StackPanel Grid.Row="0" Orientation="Horizontal"
                     HorizontalAlignment="Right" VerticalAlignment="Top"
                     WindowChrome.IsHitTestVisibleInChrome="True">
             <Button x:Name="MinimiseButton" Content="&#xE921;" Click="OnMinimise"
-                    Style="{StaticResource CaptionButton}" ToolTip="最小化" />
+                    Style="{StaticResource CaptionButton}" />
             <Button x:Name="MaximiseButton" Content="&#xE922;" Click="OnMaximise"
-                    Style="{StaticResource CaptionButton}" ToolTip="最大化" />
+                    Style="{StaticResource CaptionButton}" />
             <Button x:Name="CloseChromeButton" Content="&#xE8BB;" Click="OnCloseWindow"
-                    Style="{StaticResource CaptionButton}" ToolTip="关闭" />
+                    Style="{StaticResource CloseCaptionButton}" />
         </StackPanel>
 
         <Grid Grid.Row="1">
@@ -741,9 +801,6 @@
                                         </Grid>
                                         <CheckBox x:Name="MicaCheck"
                                                   Content="使用云母（Mica）背景材质"
-                                                  Click="OnOptionChanged" />
-                                        <CheckBox x:Name="NavCollapsedCheck"
-                                                  Content="启动时收起左侧栏"
                                                   Click="OnOptionChanged" />
                                     </StackPanel>
                                 </GroupBox>

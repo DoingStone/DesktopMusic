@@ -111,7 +111,6 @@ public partial class SettingsWindow : Window
             _ => 0,
         };
         MicaCheck.IsChecked = _working.UseMica;
-        NavCollapsedCheck.IsChecked = _working.NavCollapsed;
 
         // XAML loading and the initial value push are done; user edits may now
         // apply live.
@@ -163,7 +162,13 @@ public partial class SettingsWindow : Window
         NavPane.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         TitleFiller.Margin = collapsed ? new Thickness(0) : new Thickness(232, 0, 0, 0);
 
-        if (NavCollapsedCheck is not null) NavCollapsedCheck.IsChecked = collapsed;
+        // The identity belongs to the navigation pane, so it goes with it. The toggle has
+        // to survive the collapse or there would be no way back, so it moves from the
+        // pane's right edge to the window's left edge.
+        TitleIdentity.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        NavToggleButton.Margin = collapsed
+            ? new Thickness(8, 0, 0, 0)
+            : new Thickness(196, 0, 0, 0);
 
         if (persist)
         {
@@ -453,7 +458,6 @@ public partial class SettingsWindow : Window
         _working.ShowWhenPaused = ShowWhenPausedCheck.IsChecked == true;
         _working.HideWhenNoLyrics = HideWhenNoLyricsCheck.IsChecked == true;
         _working.UseMica = MicaCheck.IsChecked == true;
-        _working.NavCollapsed = NavCollapsedCheck.IsChecked == true;
         _working.GlobalOffsetMs = (int)Math.Round(OffsetSlider.Value);
 
         // Guarded: assigning these texts raises TextChanged, which would re-enter
@@ -598,14 +602,9 @@ public partial class SettingsWindow : Window
     {
         ApplyLive();
 
-        // Material and collapse state are properties of this window, so they have to be
-        // pushed to it rather than only written to the settings file.
+        // The material is a property of this window, so it has to be pushed to it rather
+        // than only written to the settings file.
         Interop.FluentChrome.Apply(this, _working.Theme, _working.UseMica);
-
-        if (NavCollapsedCheck is not null && NavCollapsedCheck.IsChecked != _working.NavCollapsed)
-        {
-            ApplyNavCollapsed(_working.NavCollapsed, persist: false);
-        }
     }
 
 
