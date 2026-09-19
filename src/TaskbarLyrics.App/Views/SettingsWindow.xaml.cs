@@ -87,16 +87,58 @@ public partial class SettingsWindow : Window
         _transportNext = transportNext;
         _transportPrevious = transportPrevious;
 
-        ConfigPathText.Text = $"配置文件：{AppSettings.ConfigPath}";
+        ConfigPathText.Text = AppSettings.ConfigPath;
 
         PopulateFonts();
         PopulateFontWeights();
         LoadFromWorking();
 
+        // Sidebar state. Selecting the first item also sets the page title and shows
+        // the matching page, so this must run after the fields above are populated.
+        AppIconImage.Source = AppIcons.Image;
+        AboutVersionText.Text = $"任务栏歌词 {AppVersion}";
+        AboutRepoText.Text = "https://github.com/DoingStone/DesktopMusic";
+        NavList.SelectedIndex = 0;
+
         // XAML loading and the initial value push are done; user edits may now
         // apply live.
         _loading = false;
         ValidateHotkeys();
+    }
+
+    /// <summary>Shown on the About page.</summary>
+    private static string AppVersion =>
+        typeof(SettingsWindow).Assembly.GetName().Version is { } v
+            ? $"{v.Major}.{v.Minor}.{v.Build}"
+            : "1.0.0";
+
+    /// <summary>
+    /// Page metadata, indexed to match the order of the sidebar items in XAML. Keeping
+    /// the two in one place means a page cannot be added without giving it a title.
+    /// </summary>
+    private (string Title, FrameworkElement Page)[] Pages => new[]
+    {
+        ("常规", (FrameworkElement)PageGeneral),
+        ("外观", PageAppearance),
+        ("位置与显示", PagePosition),
+        ("歌词来源", PageLyrics),
+        ("播放控制", PagePlayback),
+        ("关于", PageAbout),
+    };
+
+    private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        int index = NavList.SelectedIndex;
+        var pages = Pages;
+
+        if (index < 0 || index >= pages.Length) return;
+
+        for (int i = 0; i < pages.Length; i++)
+        {
+            pages[i].Page.Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        PageTitle.Text = pages[index].Title;
     }
 
     /// <summary>Weights offered for the lyric text.</summary>

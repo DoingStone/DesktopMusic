@@ -3,11 +3,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:TaskbarLyrics.App.Controls"
         Title="任务栏歌词 · 设置"
-        Width="600" Height="560"
-        MinWidth="540" MinHeight="460"
+        Width="900" Height="640"
+        MinWidth="780" MinHeight="540"
         WindowStartupLocation="CenterScreen"
         Topmost="False"
-        Background="#FFF3F3F3"
+        Background="{DynamicResource WindowBg}"
         Foreground="#FF1A1A1A"
         FontFamily="Microsoft YaHei UI"
         FontSize="13"
@@ -40,6 +40,21 @@
         <SolidColorBrush x:Key="ControlFill" Color="#FFFFFFFF" />
         <SolidColorBrush x:Key="ControlBorder" Color="#FFD6D6D6" />
         <SolidColorBrush x:Key="ControlHover" Color="#FFF5F5F5" />
+
+        <!--
+          Mica-aware surfaces.
+
+          These are the brush keys FluentChrome overwrites at runtime: when a Mica
+          backdrop is available the window body becomes transparent and these turn
+          translucent so the material shows through; when it is not, they stay opaque
+          and the window looks identical to the solid design. Referenced with
+          DynamicResource so the swap actually takes effect.
+        -->
+        <SolidColorBrush x:Key="WindowBg" Color="#FFF3F3F3" />
+        <SolidColorBrush x:Key="NavBg" Color="#FFEDEDED" />
+        <SolidColorBrush x:Key="ContentBg" Color="#FFF3F3F3" />
+        <SolidColorBrush x:Key="NavItemFg" Color="#FF1A1A1A" />
+        <SolidColorBrush x:Key="NavItemHover" Color="#14000000" />
 
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource Fg}" />
@@ -156,48 +171,134 @@
         </Style>
 
         <!--
-          Win11 checkbox: a 20 px rounded-square box that fills with the accent colour
-          when checked, rather than the classic small square with a tick glyph.
+          Win11 toggle switch, as used throughout the Settings app: the label sits on
+          the left and a pill-shaped switch on the right, rather than a checkbox with
+          a tick. 44x20 track, 12 px knob.
         -->
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="{StaticResource Fg}" />
-            <Setter Property="Margin" Value="0,5" />
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Padding" Value="0,9" />
             <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
-                        <StackPanel Orientation="Horizontal" Background="Transparent">
-                            <Border x:Name="Box"
-                                    Width="20" Height="20"
-                                    CornerRadius="4"
+                        <Grid Background="Transparent" Margin="{TemplateBinding Padding}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <ContentPresenter Grid.Column="0"
+                                              VerticalAlignment="Center"
+                                              Margin="0,0,16,0" />
+
+                            <Border x:Name="Track"
+                                    Grid.Column="1"
+                                    Width="44" Height="20"
+                                    CornerRadius="10"
                                     VerticalAlignment="Center"
                                     Background="#FFFFFFFF"
                                     BorderBrush="#FF8A8A8A"
                                     BorderThickness="1">
-                                <Path x:Name="Tick"
-                                      Data="M 4,9 L 8,13 L 15,5"
-                                      Stroke="White"
-                                      StrokeThickness="2"
-                                      StrokeStartLineCap="Round"
-                                      StrokeEndLineCap="Round"
-                                      Visibility="Collapsed" />
+                                <Ellipse x:Name="Knob"
+                                         Width="12" Height="12"
+                                         Fill="#FF5D5D5D"
+                                         HorizontalAlignment="Left"
+                                         Margin="3,0,0,0" />
                             </Border>
-                            <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center" />
-                        </StackPanel>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Box" Property="Background" Value="{StaticResource Accent}" />
-                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}" />
-                                <Setter TargetName="Tick" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="Track" Property="Background" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Knob" Property="Fill" Value="White" />
+                                <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right" />
+                                <Setter TargetName="Knob" Property="Margin" Value="0,0,3,0" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource Accent}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Track" Property="Opacity" Value="0.4" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!--
+          Sidebar navigation item: the selected page is a filled accent pill with white
+          text and a short accent bar to its left, matching the reference.
+        -->
+        <Style x:Key="NavItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Foreground" Value="{DynamicResource NavItemFg}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border x:Name="Bar"
+                                    Grid.Column="0"
+                                    Width="3" Height="18"
+                                    CornerRadius="1.5"
+                                    Background="Transparent"
+                                    VerticalAlignment="Center" />
+
+                            <Border x:Name="Pill"
+                                    Grid.Column="1"
+                                    Margin="3,0,8,0"
+                                    CornerRadius="5"
+                                    Background="Transparent">
+                                <ContentPresenter Margin="13,10" VerticalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Pill" Property="Background" Value="{DynamicResource NavItemHover}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Pill" Property="Background" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Bar" Property="Background" Value="{StaticResource Accent}" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+          Navigation label. Foreground is bound rather than inherited: the implicit
+          TextBlock style sets Foreground explicitly, which beats property inheritance
+          and left the selected item's text black on the accent pill.
+        -->
+        <Style x:Key="NavText" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="14,0,0,0" />
+            <Setter Property="Foreground"
+                    Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" />
+        </Style>
+
+        <!--
+          Page heading, matching the reference's large "设置" title.
+        -->
+        <Style x:Key="PageHeading" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="26" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+        </Style>
+
 
         <!--
           Win11 slider: a 4 px track with the sung portion filled in the accent colour
@@ -370,443 +471,604 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TabControl Grid.Row="0" Margin="12,12,12,0" Background="#FFFFFFFF" BorderBrush="#FFD5DAE2">
-
-            <!-- ================= 外观 ================= -->
-            <TabItem Header="外观">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
-                    <StackPanel>
-
-                        <GroupBox Header="字体">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="86" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="字体" Style="{StaticResource SettingLabel}" />
-                                <ComboBox x:Name="FontCombo" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2"
-                                          SelectionChanged="OnFontChanged" />
-
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="原文字号" Style="{StaticResource SettingLabel}" />
-                                <Slider x:Name="OriginalSizeSlider" Grid.Row="1" Grid.Column="1"
-                                        Minimum="8" Maximum="26" TickFrequency="0.5"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderChanged" />
-                                <TextBlock x:Name="OriginalSizeText" Grid.Row="1" Grid.Column="2"
-                                           Width="44" TextAlignment="Right"
-                                           VerticalAlignment="Center" Foreground="#FF2563A8" />
-
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="译文字号" Style="{StaticResource SettingLabel}" />
-                                <Slider x:Name="TranslationSizeSlider" Grid.Row="2" Grid.Column="1"
-                                        Minimum="8" Maximum="24" TickFrequency="0.5"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderChanged" />
-                                <TextBlock x:Name="TranslationSizeText" Grid.Row="2" Grid.Column="2"
-                                           Width="44" TextAlignment="Right"
-                                           VerticalAlignment="Center" Foreground="#FF2563A8" />
-
-                                <TextBlock Grid.Row="3" Grid.Column="0" Text="字重" Style="{StaticResource SettingLabel}" />
-                                <ComboBox x:Name="FontWeightCombo" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"
-                                          SelectionChanged="OnFontChanged" />
-
-                                <TextBlock Grid.Row="4" Grid.Column="0" Text="字间距" Style="{StaticResource SettingLabel}" />
-                                <Slider x:Name="LetterSpacingSlider" Grid.Row="4" Grid.Column="1"
-                                        Minimum="0" Maximum="6" TickFrequency="0.5"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderChanged" />
-                                <TextBlock x:Name="LetterSpacingText" Grid.Row="4" Grid.Column="2"
-                                           Width="44" TextAlignment="Right"
-                                           VerticalAlignment="Center" Foreground="#FF2563A8" />
-                            </Grid>
-                        </GroupBox>
-
-                        <GroupBox Header="颜色">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="110" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="已唱高亮" Style="{StaticResource SettingLabel}" />
-                                <controls:ColorField x:Name="HighlightColorField" Grid.Row="0" Grid.Column="1"
-                                                     Margin="0,3" ColorChanged="OnColorChanged" />
-
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="未唱文字" Style="{StaticResource SettingLabel}" />
-                                <controls:ColorField x:Name="BaseColorField" Grid.Row="1" Grid.Column="1"
-                                                     Margin="0,3" ColorChanged="OnColorChanged" />
-
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="下一行预览" Style="{StaticResource SettingLabel}" />
-                                <controls:ColorField x:Name="ContextColorField" Grid.Row="2" Grid.Column="1"
-                                                     Margin="0,3" ColorChanged="OnColorChanged" />
-
-                                <TextBlock Grid.Row="3" Grid.Column="0" Text="背景板" Style="{StaticResource SettingLabel}" />
-                                <controls:ColorField x:Name="BackgroundColorField" Grid.Row="3" Grid.Column="1"
-                                                     Margin="0,3" ColorChanged="OnColorChanged" />
-                            </Grid>
-                        </GroupBox>
-
-                        <GroupBox Header="背景板与高亮">
-                            <StackPanel>
-                                <CheckBox x:Name="ShowBackgroundCheck" Content="显示背景板（提升浅色任务栏下的可读性）"
-                                          Click="OnOptionChanged" />
-
-                                <Grid Margin="0,4,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="110" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="圆角" Style="{StaticResource SettingLabel}" />
-                                    <Slider x:Name="CornerSlider" Grid.Column="1"
-                                            Minimum="0" Maximum="20" TickFrequency="1"
-                                            IsSnapToTickEnabled="True"
-                                            VerticalAlignment="Center"
-                                            ValueChanged="OnSliderChanged" />
-                                    <TextBlock x:Name="CornerText" Grid.Column="2" Width="44"
-                                               TextAlignment="Right" VerticalAlignment="Center"
-                                               Foreground="#FF2563A8" />
-                                </Grid>
-
-                                <CheckBox x:Name="WordHighlightCheck" Content="逐字高亮（按演唱进度推进）"
-                                          Click="OnOptionChanged" />
-                                <CheckBox x:Name="ShowTranslationCheck" Content="显示翻译行"
-                                          Click="OnOptionChanged" />
-                                <CheckBox x:Name="ShowContextCheck" Content="显示下一行预览"
-                                          Click="OnOptionChanged" />
-                            </StackPanel>
-                        </GroupBox>
-
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
-            <!-- ================= 位置 ================= -->
-            <TabItem Header="位置与显示">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
-                    <StackPanel>
-
-                        <GroupBox Header="尺寸与位置">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="110" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="宽度" Style="{StaticResource SettingLabel}" />
-                                <Slider x:Name="WidthSlider" Grid.Row="0" Grid.Column="1"
-                                        Minimum="160" Maximum="1400" TickFrequency="10"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderChanged" />
-                                <TextBlock x:Name="WidthText" Grid.Row="0" Grid.Column="2" Width="58"
-                                           TextAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="#FF2563A8" />
-
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="高度" Style="{StaticResource SettingLabel}" />
-                                <Slider x:Name="HeightSlider" Grid.Row="1" Grid.Column="1"
-                                        Minimum="0" Maximum="80" TickFrequency="2"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderChanged"
-                                        ToolTip="0 = 自动适应任务栏高度" />
-                                <TextBlock x:Name="HeightText" Grid.Row="1" Grid.Column="2" Width="58"
-                                           TextAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="#FF2563A8" />
-
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="垂直对齐" Style="{StaticResource SettingLabel}" />
-                                <Slider x:Name="VerticalAlignSlider" Grid.Row="2" Grid.Column="1"
-                                        Minimum="-1" Maximum="1" TickFrequency="0.1"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderChanged"
-                                        ToolTip="相对任务栏高度上下微调" />
-                                <TextBlock x:Name="VerticalAlignText" Grid.Row="2" Grid.Column="2" Width="58"
-                                           TextAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="#FF2563A8" />
-
-                                <TextBlock Grid.Row="3" Grid.Column="0" Text="水平偏移" Style="{StaticResource SettingLabel}" />
-                                <!--
-                                  Range deliberately wider than any real screen so a
-                                  long drag is never clamped by the slider and then
-                                  written back as a smaller value on the next edit.
-                                -->
-                                <Slider x:Name="OffsetXSlider" Grid.Row="3" Grid.Column="1"
-                                        Minimum="-4000" Maximum="4000" TickFrequency="10"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderChanged" />
-                                <TextBlock x:Name="OffsetXText" Grid.Row="3" Grid.Column="2" Width="58"
-                                           TextAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="#FF0067C0" />
-
-                                <TextBlock Grid.Row="4" Grid.Column="0" Text="垂直偏移" Style="{StaticResource SettingLabel}" />
-                                <Slider x:Name="OffsetYSlider" Grid.Row="4" Grid.Column="1"
-                                        Minimum="-200" Maximum="200" TickFrequency="1"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderChanged" />
-                                <TextBlock x:Name="OffsetYText" Grid.Row="4" Grid.Column="2" Width="58"
-                                           TextAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="#FF0067C0" />
-                            </Grid>
-                        </GroupBox>
-
-                        <GroupBox Header="透明度">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="110" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="整体不透明度" Style="{StaticResource SettingLabel}" />
-                                <Slider x:Name="OpacitySlider" Grid.Column="1"
-                                        Minimum="0.15" Maximum="1" TickFrequency="0.05"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderChanged" />
-                                <TextBlock x:Name="OpacityText" Grid.Column="2" Width="58"
-                                           TextAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="#FF2563A8" />
-                            </Grid>
-                        </GroupBox>
-
-                        <GroupBox Header="微调位置">
-                            <StackPanel>
-                                <TextBlock Text="歌词条可直接用鼠标拖动（需开启上方「歌词可拖动」）；也可用下面的按钮精确微调。"
-                                           Foreground="#FF6B7280" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap" />
-                                <UniformGrid Columns="4">
-                                    <Button Content="← 左移" Click="OnMoveLeft" />
-                                    <Button Content="右移 →" Click="OnMoveRight" />
-                                    <Button Content="↑ 上移" Click="OnMoveUp" />
-                                    <Button Content="↓ 下移" Click="OnMoveDown" />
-                                </UniformGrid>
-                                <Button Content="恢复默认位置与宽度" Click="OnResetPosition"
-                                        Margin="0,8,0,0" HorizontalAlignment="Left" />
-                            </StackPanel>
-                        </GroupBox>
-
-                        <GroupBox Header="行为">
-                            <StackPanel>
-                                <CheckBox x:Name="InteractiveCheck"
-                                          Content="歌词可拖动 / 可点击（关闭则整条点击穿透）"
-                                          Click="OnOptionChanged" />
-                                <CheckBox x:Name="PlaceAboveCheck"
-                                          Content="浮在任务栏上方（彻底消除闪烁，代价是不在任务栏内）"
-                                          Click="OnOptionChanged" />
-                                <CheckBox x:Name="TransportControlsCheck"
-                                          Content="在歌词条内显示播放控制按钮（上一首 / 暂停 / 下一首）"
-                                          Click="OnOptionChanged" />
-                                <CheckBox x:Name="SongProgressCheck"
-                                          Content="显示歌曲进度（播放按键下方）"
-                                          Click="OnOptionChanged" />
-                                <CheckBox x:Name="VisibleCheck" Content="在任务栏显示歌词"
-                                          Click="OnOptionChanged" />
-                                <CheckBox x:Name="ShowWhenPausedCheck" Content="暂停时仍然显示"
-                                          Click="OnOptionChanged" />
-                                <CheckBox x:Name="HideWhenNoLyricsCheck" Content="找不到歌词时隐藏"
-                                          Click="OnOptionChanged" />
-                            </StackPanel>
-                        </GroupBox>
-
-                        <GroupBox Header="歌词同步微调">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="110" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="偏移（毫秒）" Style="{StaticResource SettingLabel}" />
-                                <Slider x:Name="OffsetSlider" Grid.Column="1"
-                                        Minimum="-5000" Maximum="5000" TickFrequency="50"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="OnSliderChanged" />
-                                <TextBlock x:Name="OffsetText" Grid.Column="2" Width="70"
-                                           TextAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="#FF2563A8" />
-                            </Grid>
-                        </GroupBox>
-
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
-            <!-- ================= 歌词来源 ================= -->
-            <TabItem Header="歌词来源">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
-                    <StackPanel>
-
-                        <GroupBox Header="在线歌词来源">
-                            <StackPanel>
-                                <TextBlock Text="多个来源会并发检索，再按标题、歌手、时长打分择优。"
-                                           Foreground="#FF6B7280" FontSize="11"
-                                           TextWrapping="Wrap" Margin="0,0,0,6" />
-                                <CheckBox x:Name="QqMusicCheck" Content="QQ音乐（中文曲库最全）"
-                                          Click="OnProviderChanged" />
-                                <CheckBox x:Name="NetEaseCheck" Content="网易云音乐（补充曲库与翻译）"
-                                          Click="OnProviderChanged" />
-                                <CheckBox x:Name="LrclibCheck" Content="LRCLIB（欧美曲库，开放数据库）"
-                                          Click="OnProviderChanged" />
-                            </StackPanel>
-                        </GroupBox>
-
-                        <GroupBox Header="缓存与匹配">
-                            <StackPanel>
-                                <TextBlock Text="换歌后歌词不正确时，可先「重新匹配」；仍不对则清空缓存再试。"
-                                           Foreground="#FF6B7280" FontSize="11"
-                                           TextWrapping="Wrap" Margin="0,0,0,6" />
-                                <StackPanel Orientation="Horizontal">
-                                    <Button Content="重新匹配当前歌曲" Click="OnRematch" Margin="0" />
-                                    <Button Content="清空歌词缓存" Click="OnClearCache" />
-                                </StackPanel>
-                            </StackPanel>
-                        </GroupBox>
-
-                        <GroupBox Header="诊断">
-                            <StackPanel>
-                                <TextBlock Text="用于排查问题：显示当前曲目、各歌词源命中与歌词匹配结果。"
-                                           Foreground="#FF6B7280" FontSize="11"
-                                           TextWrapping="Wrap" Margin="0,0,0,6" />
-                                <Button Content="查看当前歌词匹配详情" Click="OnShowDiagnostics"
-                                        HorizontalAlignment="Left" Margin="0" />
-                            </StackPanel>
-                        </GroupBox>
-
-                        <TextBlock Text="提示：修改后点「保存」写入配置文件；「取消」会恢复打开设置前的状态。"
-                                   Foreground="#FF6B7280" FontSize="11" TextWrapping="Wrap" Margin="2,0,0,8" />
-                        <TextBlock x:Name="ConfigPathText"
-                                   Foreground="#FF2563A8" FontSize="11"
-                                   TextWrapping="Wrap" />
-
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
-            <!-- ================= 播放控制 ================= -->
-            <TabItem Header="播放控制">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
-                    <StackPanel>
-
-                        <GroupBox Header="立即控制当前播放器">
-                            <StackPanel>
-                                <TextBlock Text="命令会发送给正在为歌词提供播放信息的那个播放器。若播放器未开放相应控件，按钮会提示不支持。"
-                                           Foreground="#FF6B7280" FontSize="11"
-                                           TextWrapping="Wrap" Margin="0,0,0,8" />
-                                <UniformGrid Columns="3">
-                                    <Button Content="⏮  上一首" Click="OnTransportPrevious" />
-                                    <Button Content="⏯  暂停/播放" Click="OnTransportPlayPause" />
-                                    <Button Content="⏭  下一首" Click="OnTransportNext" />
-                                </UniformGrid>
-                            </StackPanel>
-                        </GroupBox>
-
-                        <GroupBox Header="全局快捷键">
-                            <StackPanel>
-                                <TextBlock Text="快捷键在系统范围内生效，因此不必让歌词框接收鼠标点击。留空即可关闭某一项。格式示例：Ctrl+Alt+Space、Ctrl+Alt+Right。"
-                                           Foreground="#FF6B7280" FontSize="11"
-                                           TextWrapping="Wrap" Margin="0,0,0,8" />
-
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="130" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="暂停 / 播放" Style="{StaticResource SettingLabel}" />
-                                    <TextBox x:Name="HotkeyPlayPauseBox" Grid.Row="0" Grid.Column="1"
-                                             Margin="0,3" TextChanged="OnHotkeyTextChanged" />
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="下一首" Style="{StaticResource SettingLabel}" />
-                                    <TextBox x:Name="HotkeyNextBox" Grid.Row="1" Grid.Column="1"
-                                             Margin="0,3" TextChanged="OnHotkeyTextChanged" />
-
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="上一首" Style="{StaticResource SettingLabel}" />
-                                    <TextBox x:Name="HotkeyPreviousBox" Grid.Row="2" Grid.Column="1"
-                                             Margin="0,3" TextChanged="OnHotkeyTextChanged" />
-
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="显示 / 隐藏歌词" Style="{StaticResource SettingLabel}" />
-                                    <TextBox x:Name="HotkeyToggleBox" Grid.Row="3" Grid.Column="1"
-                                             Margin="0,3" TextChanged="OnHotkeyTextChanged" />
-                                </Grid>
-
-                                <TextBlock x:Name="HotkeyStatusText"
-                                           Foreground="#FF2563A8" FontSize="11"
-                                           TextWrapping="Wrap" Margin="0,8,0,0" />
-                            </StackPanel>
-                        </GroupBox>
-
-                        <GroupBox Header="拖动说明">
-                            <TextBlock Text="在「位置与显示」中关闭「锁定位置」后，即可直接用鼠标拖动任务栏上的歌词框来调整位置；位置会自动保存。重新开启锁定后恢复点击穿透，不会挡住任务栏操作。"
-                                       Foreground="#FF6B7280" FontSize="11" TextWrapping="Wrap" />
-                        </GroupBox>
-
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-        </TabControl>
-
-        <!-- Footer -->
-        <Grid Grid.Row="1" Margin="12,10,12,12">
+        <Grid Grid.Row="0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
+                <!-- Navigation pane, as in the Windows 11 Settings reference. -->
+                <ColumnDefinition Width="232" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <Button Grid.Column="0" x:Name="ResetButton" Content="恢复默认设置"
-                    Click="OnRestoreDefaults" Margin="0" MinWidth="120" />
+            <!-- ==================== 侧边导航 ==================== -->
+            <Border Grid.Column="0" Background="{DynamicResource NavBg}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top"
+                                Orientation="Horizontal"
+                                Margin="18,20,12,16">
+                        <Image x:Name="AppIconImage" Width="22" Height="22"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <TextBlock Text="任务栏歌词"
+                                   Margin="10,0,0,0"
+                                   VerticalAlignment="Center"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource Fg}" />
+                    </StackPanel>
 
-            <TextBlock x:Name="StatusText" Grid.Column="1"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Center"
-                       TextTrimming="CharacterEllipsis"
-                       Foreground="#FF1E874B" />
+                    <ListBox x:Name="NavList"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Margin="8,0,0,12"
+                             ItemContainerStyle="{StaticResource NavItem}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             SelectionChanged="OnNavSelectionChanged">
 
-            <StackPanel Grid.Column="2" Orientation="Horizontal">
-                <Button x:Name="QuitButton" Content="退出程序"
-                        Click="OnQuit"
-                        ToolTip="关闭任务栏歌词并退出" />
-                <Button x:Name="CloseButton" Content="关闭"
-                        Click="OnCloseWindow"
-                        IsCancel="True"
-                        ToolTip="收起本窗口，歌词继续显示（设置已保存）" />
-                <Button x:Name="SaveButton" Content="保存"
-                        Click="OnSave"
-                        IsDefault="True"
-                        ToolTip="保存设置但不关闭窗口" />
-            </StackPanel>
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal">
+                                <Path Width="18" Height="18" Stretch="Uniform"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                      StrokeThickness="1.5"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="M3,5 H15 M3,9 H15 M3,13 H15" />
+                                <TextBlock Text="常规" Style="{StaticResource NavText}" />
+                            </StackPanel>
+                        </ListBoxItem>
+
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal">
+                                <Grid Width="18" Height="18">
+                                    <Ellipse Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                             StrokeThickness="1.5" />
+                                    <Ellipse Width="5" Height="5" Margin="0,0,3,3"
+                                             HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                             Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" />
+                                </Grid>
+                                <TextBlock Text="外观" Style="{StaticResource NavText}" />
+                            </StackPanel>
+                        </ListBoxItem>
+
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal">
+                                <Path Width="18" Height="18" Stretch="Uniform"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                      StrokeThickness="1.5"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="M2,4 H16 V14 H2 Z M7,18 H11 M9,14 V18" />
+                                <TextBlock Text="位置与显示" Style="{StaticResource NavText}" />
+                            </StackPanel>
+                        </ListBoxItem>
+
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal">
+                                <Grid Width="18" Height="18">
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                          StrokeThickness="1.5"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          Data="M6.5,13.5 V3.5 L14.5,2 V12" />
+                                    <Ellipse Width="5" Height="5" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                             Margin="2,0,0,1"
+                                             Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                             StrokeThickness="1.5" />
+                                    <Ellipse Width="5" Height="5" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                             Margin="0,0,2,0"
+                                             Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                             StrokeThickness="1.5" />
+                                </Grid>
+                                <TextBlock Text="歌词来源" Style="{StaticResource NavText}" />
+                            </StackPanel>
+                        </ListBoxItem>
+
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal">
+                                <Path Width="18" Height="18" Stretch="Uniform"
+                                      Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                      Data="M5,3 L15,9 L5,15 Z" />
+                                <TextBlock Text="播放控制" Style="{StaticResource NavText}" />
+                            </StackPanel>
+                        </ListBoxItem>
+
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal">
+                                <Grid Width="18" Height="18">
+                                    <Ellipse Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                             StrokeThickness="1.5" />
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                          StrokeThickness="1.6"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          Data="M9,8.2 V13 M9,5.4 V5.5" />
+                                </Grid>
+                                <TextBlock Text="关于" Style="{StaticResource NavText}" />
+                            </StackPanel>
+                        </ListBoxItem>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- ==================== 内容区 ==================== -->
+            <Border Grid.Column="1" Background="{DynamicResource ContentBg}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock x:Name="PageTitle" Grid.Row="0"
+                               Style="{StaticResource PageHeading}"
+                               Margin="32,26,32,0" />
+
+                    <Border Grid.Row="1" Height="1"
+                            Background="{StaticResource Line}"
+                            Margin="32,18,32,0" />
+
+                    <ScrollViewer Grid.Row="2"
+                                  VerticalScrollBarVisibility="Auto"
+                                  Padding="32,20,32,28">
+                        <Grid>
+
+                            <!-- ============ 常规 ============ -->
+                            <StackPanel x:Name="PageGeneral">
+                                <GroupBox Header="显示">
+                                    <StackPanel>
+                                        <CheckBox x:Name="VisibleCheck" Content="在任务栏显示歌词"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="ShowWhenPausedCheck" Content="暂停时仍然显示"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="HideWhenNoLyricsCheck" Content="找不到歌词时隐藏"
+                                                  Click="OnOptionChanged" />
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <GroupBox Header="交互">
+                                    <StackPanel>
+                                        <CheckBox x:Name="InteractiveCheck"
+                                                  Content="歌词可拖动 / 可点击（关闭则整条点击穿透）"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="PlaceAboveCheck"
+                                                  Content="浮在任务栏上方（彻底消除闪烁，代价是不在任务栏内）"
+                                                  Click="OnOptionChanged" />
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <GroupBox Header="歌词条内容">
+                                    <StackPanel>
+                                        <CheckBox x:Name="TransportControlsCheck"
+                                                  Content="显示播放控制按钮（上一首 / 暂停 / 下一首）"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="SongProgressCheck"
+                                                  Content="显示歌曲进度（播放按键下方）"
+                                                  Click="OnOptionChanged" />
+                                    </StackPanel>
+                                </GroupBox>
+                            </StackPanel>
+
+                            <!-- ============ 外观 ============ -->
+                            <StackPanel x:Name="PageAppearance" Visibility="Collapsed">
+                                <GroupBox Header="字体">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="86" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="字体" Style="{StaticResource SettingLabel}" />
+                                        <ComboBox x:Name="FontCombo" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2"
+                                                  SelectionChanged="OnFontChanged" />
+
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="原文字号" Style="{StaticResource SettingLabel}" />
+                                        <Slider x:Name="OriginalSizeSlider" Grid.Row="1" Grid.Column="1"
+                                                Minimum="8" Maximum="26" TickFrequency="0.5"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderChanged" />
+                                        <TextBlock x:Name="OriginalSizeText" Grid.Row="1" Grid.Column="2"
+                                                   Width="44" TextAlignment="Right"
+                                                   VerticalAlignment="Center" Foreground="#FF0067C0" />
+
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Text="译文字号" Style="{StaticResource SettingLabel}" />
+                                        <Slider x:Name="TranslationSizeSlider" Grid.Row="2" Grid.Column="1"
+                                                Minimum="8" Maximum="24" TickFrequency="0.5"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderChanged" />
+                                        <TextBlock x:Name="TranslationSizeText" Grid.Row="2" Grid.Column="2"
+                                                   Width="44" TextAlignment="Right"
+                                                   VerticalAlignment="Center" Foreground="#FF0067C0" />
+
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Text="字重" Style="{StaticResource SettingLabel}" />
+                                        <ComboBox x:Name="FontWeightCombo" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"
+                                                  SelectionChanged="OnFontChanged" />
+
+                                        <TextBlock Grid.Row="4" Grid.Column="0" Text="字间距" Style="{StaticResource SettingLabel}" />
+                                        <Slider x:Name="LetterSpacingSlider" Grid.Row="4" Grid.Column="1"
+                                                Minimum="0" Maximum="6" TickFrequency="0.5"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderChanged" />
+                                        <TextBlock x:Name="LetterSpacingText" Grid.Row="4" Grid.Column="2"
+                                                   Width="44" TextAlignment="Right"
+                                                   VerticalAlignment="Center" Foreground="#FF0067C0" />
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="颜色">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="已唱高亮" Style="{StaticResource SettingLabel}" />
+                                        <controls:ColorField x:Name="HighlightColorField" Grid.Row="0" Grid.Column="1"
+                                                             Margin="0,3" ColorChanged="OnColorChanged" />
+
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="未唱文字" Style="{StaticResource SettingLabel}" />
+                                        <controls:ColorField x:Name="BaseColorField" Grid.Row="1" Grid.Column="1"
+                                                             Margin="0,3" ColorChanged="OnColorChanged" />
+
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Text="下一行预览" Style="{StaticResource SettingLabel}" />
+                                        <controls:ColorField x:Name="ContextColorField" Grid.Row="2" Grid.Column="1"
+                                                             Margin="0,3" ColorChanged="OnColorChanged" />
+
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Text="背景板" Style="{StaticResource SettingLabel}" />
+                                        <controls:ColorField x:Name="BackgroundColorField" Grid.Row="3" Grid.Column="1"
+                                                             Margin="0,3" ColorChanged="OnColorChanged" />
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="背景板与高亮">
+                                    <StackPanel>
+                                        <CheckBox x:Name="ShowBackgroundCheck" Content="显示背景板（提升浅色任务栏下的可读性）"
+                                                  Click="OnOptionChanged" />
+
+                                        <Grid Margin="0,6,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="110" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="圆角" Style="{StaticResource SettingLabel}" />
+                                            <Slider x:Name="CornerSlider" Grid.Column="1"
+                                                    Minimum="0" Maximum="20" TickFrequency="1"
+                                                    IsSnapToTickEnabled="True"
+                                                    VerticalAlignment="Center"
+                                                    ValueChanged="OnSliderChanged" />
+                                            <TextBlock x:Name="CornerText" Grid.Column="2" Width="44"
+                                                       TextAlignment="Right" VerticalAlignment="Center"
+                                                       Foreground="#FF0067C0" />
+                                        </Grid>
+
+                                        <CheckBox x:Name="WordHighlightCheck" Content="逐字高亮（按演唱进度推进）"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="ShowTranslationCheck" Content="显示翻译行"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="ShowContextCheck" Content="显示下一行预览"
+                                                  Click="OnOptionChanged" />
+                                    </StackPanel>
+                                </GroupBox>
+                            </StackPanel>
+
+                            <!-- ============ 位置与显示 ============ -->
+                            <StackPanel x:Name="PagePosition" Visibility="Collapsed">
+                                <GroupBox Header="尺寸与位置">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="宽度" Style="{StaticResource SettingLabel}" />
+                                        <Slider x:Name="WidthSlider" Grid.Row="0" Grid.Column="1"
+                                                Minimum="160" Maximum="1400" TickFrequency="10"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderChanged" />
+                                        <TextBlock x:Name="WidthText" Grid.Row="0" Grid.Column="2" Width="58"
+                                                   TextAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="#FF0067C0" />
+
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="高度" Style="{StaticResource SettingLabel}" />
+                                        <Slider x:Name="HeightSlider" Grid.Row="1" Grid.Column="1"
+                                                Minimum="0" Maximum="80" TickFrequency="2"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderChanged"
+                                                ToolTip="0 = 自动适应任务栏高度" />
+                                        <TextBlock x:Name="HeightText" Grid.Row="1" Grid.Column="2" Width="58"
+                                                   TextAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="#FF0067C0" />
+
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Text="垂直对齐" Style="{StaticResource SettingLabel}" />
+                                        <Slider x:Name="VerticalAlignSlider" Grid.Row="2" Grid.Column="1"
+                                                Minimum="-1" Maximum="1" TickFrequency="0.1"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderChanged"
+                                                ToolTip="相对任务栏高度上下微调" />
+                                        <TextBlock x:Name="VerticalAlignText" Grid.Row="2" Grid.Column="2" Width="58"
+                                                   TextAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="#FF0067C0" />
+
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Text="水平偏移" Style="{StaticResource SettingLabel}" />
+                                        <!--
+                                          Range deliberately wider than any real screen so a
+                                          long drag is never clamped by the slider and then
+                                          written back as a smaller value on the next edit.
+                                        -->
+                                        <Slider x:Name="OffsetXSlider" Grid.Row="3" Grid.Column="1"
+                                                Minimum="-4000" Maximum="4000" TickFrequency="10"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderChanged" />
+                                        <TextBlock x:Name="OffsetXText" Grid.Row="3" Grid.Column="2" Width="58"
+                                                   TextAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="#FF0067C0" />
+
+                                        <TextBlock Grid.Row="4" Grid.Column="0" Text="垂直偏移" Style="{StaticResource SettingLabel}" />
+                                        <Slider x:Name="OffsetYSlider" Grid.Row="4" Grid.Column="1"
+                                                Minimum="-200" Maximum="200" TickFrequency="1"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderChanged" />
+                                        <TextBlock x:Name="OffsetYText" Grid.Row="4" Grid.Column="2" Width="58"
+                                                   TextAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="#FF0067C0" />
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="透明度">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="整体不透明度" Style="{StaticResource SettingLabel}" />
+                                        <Slider x:Name="OpacitySlider" Grid.Column="1"
+                                                Minimum="0.15" Maximum="1" TickFrequency="0.05"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderChanged" />
+                                        <TextBlock x:Name="OpacityText" Grid.Column="2" Width="58"
+                                                   TextAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="#FF0067C0" />
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="歌词同步微调">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="偏移（毫秒）" Style="{StaticResource SettingLabel}" />
+                                        <Slider x:Name="OffsetSlider" Grid.Column="1"
+                                                Minimum="-5000" Maximum="5000" TickFrequency="50"
+                                                IsSnapToTickEnabled="True"
+                                                VerticalAlignment="Center"
+                                                ValueChanged="OnSliderChanged" />
+                                        <TextBlock x:Name="OffsetText" Grid.Column="2" Width="70"
+                                                   TextAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="#FF0067C0" />
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="微调位置">
+                                    <StackPanel>
+                                        <TextBlock Text="歌词条可直接用鼠标拖动（需在「常规」中开启「歌词可拖动」）；也可用下面的按钮精确微调。"
+                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   Margin="0,0,0,10" TextWrapping="Wrap" />
+                                        <UniformGrid Columns="4">
+                                            <Button Content="← 左移" Click="OnMoveLeft" />
+                                            <Button Content="右移 →" Click="OnMoveRight" />
+                                            <Button Content="↑ 上移" Click="OnMoveUp" />
+                                            <Button Content="↓ 下移" Click="OnMoveDown" />
+                                        </UniformGrid>
+                                        <Button Content="恢复默认位置与宽度" Click="OnResetPosition"
+                                                Margin="0,10,0,0" HorizontalAlignment="Left" />
+                                    </StackPanel>
+                                </GroupBox>
+                            </StackPanel>
+
+                            <!-- ============ 歌词来源 ============ -->
+                            <StackPanel x:Name="PageLyrics" Visibility="Collapsed">
+                                <GroupBox Header="在线歌词来源">
+                                    <StackPanel>
+                                        <TextBlock Text="多个来源会并发检索，再按标题、歌手、时长打分择优。"
+                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   TextWrapping="Wrap" Margin="0,0,0,8" />
+                                        <CheckBox x:Name="QqMusicCheck" Content="QQ音乐（中文曲库最全）"
+                                                  Click="OnProviderChanged" />
+                                        <CheckBox x:Name="NetEaseCheck" Content="网易云音乐（补充曲库与翻译）"
+                                                  Click="OnProviderChanged" />
+                                        <CheckBox x:Name="LrclibCheck" Content="LRCLIB（欧美曲库，开放数据库）"
+                                                  Click="OnProviderChanged" />
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <GroupBox Header="缓存与匹配">
+                                    <StackPanel>
+                                        <TextBlock Text="换歌后歌词不正确时，可先「重新匹配」；仍不对则清空缓存再试。"
+                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   TextWrapping="Wrap" Margin="0,0,0,10" />
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button Content="重新匹配当前歌曲" Click="OnRematch" Margin="0" />
+                                            <Button Content="清空歌词缓存" Click="OnClearCache" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <GroupBox Header="诊断">
+                                    <StackPanel>
+                                        <TextBlock Text="用于排查问题：显示当前曲目、各歌词源命中与歌词匹配结果。"
+                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   TextWrapping="Wrap" Margin="0,0,0,10" />
+                                        <Button Content="查看当前歌词匹配详情" Click="OnShowDiagnostics"
+                                                HorizontalAlignment="Left" Margin="0" />
+                                    </StackPanel>
+                                </GroupBox>
+                            </StackPanel>
+
+                            <!-- ============ 播放控制 ============ -->
+                            <StackPanel x:Name="PagePlayback" Visibility="Collapsed">
+                                <GroupBox Header="立即控制当前播放器">
+                                    <StackPanel>
+                                        <TextBlock Text="命令会发送给正在为歌词提供播放信息的那个播放器。若播放器未开放相应控件，按钮会提示不支持。"
+                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   TextWrapping="Wrap" Margin="0,0,0,10" />
+                                        <UniformGrid Columns="3">
+                                            <Button Content="⏮  上一首" Click="OnTransportPrevious" />
+                                            <Button Content="⏯  暂停/播放" Click="OnTransportPlayPause" />
+                                            <Button Content="⏭  下一首" Click="OnTransportNext" />
+                                        </UniformGrid>
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <GroupBox Header="全局快捷键">
+                                    <StackPanel>
+                                        <TextBlock Text="快捷键在系统范围内生效，因此不必让歌词框接收鼠标点击。留空即可关闭某一项。格式示例：Ctrl+Alt+Space、Ctrl+Alt+Right。"
+                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   TextWrapping="Wrap" Margin="0,0,0,10" />
+
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="130" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="暂停 / 播放" Style="{StaticResource SettingLabel}" />
+                                            <TextBox x:Name="HotkeyPlayPauseBox" Grid.Row="0" Grid.Column="1"
+                                                     Margin="0,3" TextChanged="OnHotkeyTextChanged" />
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="下一首" Style="{StaticResource SettingLabel}" />
+                                            <TextBox x:Name="HotkeyNextBox" Grid.Row="1" Grid.Column="1"
+                                                     Margin="0,3" TextChanged="OnHotkeyTextChanged" />
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="上一首" Style="{StaticResource SettingLabel}" />
+                                            <TextBox x:Name="HotkeyPreviousBox" Grid.Row="2" Grid.Column="1"
+                                                     Margin="0,3" TextChanged="OnHotkeyTextChanged" />
+
+                                            <TextBlock Grid.Row="3" Grid.Column="0" Text="显示 / 隐藏歌词" Style="{StaticResource SettingLabel}" />
+                                            <TextBox x:Name="HotkeyToggleBox" Grid.Row="3" Grid.Column="1"
+                                                     Margin="0,3" TextChanged="OnHotkeyTextChanged" />
+                                        </Grid>
+
+                                        <TextBlock x:Name="HotkeyStatusText"
+                                                   Foreground="#FF0067C0" FontSize="11"
+                                                   TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <GroupBox Header="拖动说明">
+                                    <TextBlock Text="在「常规」中开启「歌词可拖动」后，即可直接用鼠标拖动任务栏上的歌词框来调整位置；位置会自动保存。关闭后恢复点击穿透，不会挡住任务栏操作。"
+                                               Foreground="{StaticResource FgMuted}" FontSize="11" TextWrapping="Wrap" />
+                                </GroupBox>
+                            </StackPanel>
+
+                            <!-- ============ 关于 ============ -->
+                            <StackPanel x:Name="PageAbout" Visibility="Collapsed">
+                                <GroupBox Header="关于本程序">
+                                    <StackPanel>
+                                        <TextBlock x:Name="AboutVersionText"
+                                                   Foreground="{StaticResource Fg}" FontWeight="SemiBold"
+                                                   Margin="0,0,0,6" />
+                                        <TextBlock Text="在 Windows 任务栏的空白区域显示当前播放歌曲的歌词，支持逐字高亮、翻译、歌曲进度与播放控制。"
+                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <GroupBox Header="链接">
+                                    <StackPanel>
+                                        <TextBlock Text="项目主页与问题反馈" Foreground="{StaticResource Fg}"
+                                                   Margin="0,0,0,4" />
+                                        <TextBlock x:Name="AboutRepoText" Foreground="#FF0067C0"
+                                                   FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10" />
+                                        <TextBlock Text="许可证：MIT" Foreground="{StaticResource FgMuted}" FontSize="11" />
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <GroupBox Header="配置文件">
+                                    <StackPanel>
+                                        <TextBlock Text="修改后点「保存」写入下面的文件；「关闭」会恢复打开设置前的状态。"
+                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   TextWrapping="Wrap" Margin="0,0,0,8" />
+                                        <TextBlock x:Name="ConfigPathText"
+                                                   Foreground="#FF0067C0" FontSize="11"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </GroupBox>
+                            </StackPanel>
+
+                        </Grid>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
         </Grid>
+
+        <!-- ==================== 底部操作栏 ==================== -->
+        <Border Grid.Row="1"
+                Background="{DynamicResource ContentBg}"
+                BorderBrush="{StaticResource Line}"
+                BorderThickness="0,1,0,0">
+            <Grid Margin="18,12,18,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Button Grid.Column="0" x:Name="ResetButton" Content="恢复默认设置"
+                        Click="OnRestoreDefaults" Margin="0" MinWidth="120" />
+
+                <TextBlock x:Name="StatusText" Grid.Column="1"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           Foreground="#FF1E874B" />
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button x:Name="QuitButton" Content="退出程序"
+                            Click="OnQuit"
+                            ToolTip="关闭任务栏歌词并退出" />
+                    <Button x:Name="CloseButton" Content="关闭"
+                            Click="OnCloseWindow"
+                            IsCancel="True"
+                            ToolTip="收起本窗口，歌词继续显示（设置已保存）" />
+                    <Button x:Name="SaveButton" Content="保存"
+                            Click="OnSave"
+                            IsDefault="True"
+                            ToolTip="保存设置但不关闭窗口" />
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </Window>
