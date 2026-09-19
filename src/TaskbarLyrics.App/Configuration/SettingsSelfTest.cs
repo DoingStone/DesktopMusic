@@ -112,8 +112,115 @@ internal static class SettingsSelfTest
         VerifyPalette(output, ref passed, ref failed);
 
         output.WriteLine();
+        output.WriteLine("=== translation line centring ===");
+        VerifyTranslationCentring(output, ref passed, ref failed);
+
+        output.WriteLine();
         output.WriteLine($"settings self-test: {passed} passed, {failed} failed");
         return failed == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Render a lyric pair off-screen and confirm the translation row is centred on its
+    /// own width.
+    /// <para>
+    /// It used to be positioned from the original line's width, which left a shorter
+    /// translation aligned to that line's left edge and read as left-shifted. Asserting
+    /// the rendered ink position catches that; asserting layout properties would not.
+    /// </para>
+    /// </summary>
+    private static void VerifyTranslationCentring(TextWriter output, ref int passed, ref int failed)
+    {
+        int ok = 0, bad = 0;
+
+        void Check(string name, bool success, string? detail = null)
+        {
+            output.WriteLine($"  {(success ? "PASS" : "FAIL")}  {name}{(detail is null ? "" : $"  ({detail})")}");
+            if (success) ok++; else bad++;
+        }
+
+        try
+        {
+            const int width = 600;
+            const int height = 64;
+
+            var line = new Controls.KaraokeLine
+            {
+                // The translation is deliberately the wider of the two, and much wider
+                // than the original. Otherwise the scan band catches the original's own
+                // ink and the test passes without ever measuring the translation.
+                Text = new string('长', 2),
+                Translation = new string('译', 12),
+                IsCurrent = true,
+                WordHighlightEnabled = true,
+                FontSizeValue = 22,
+                TranslationFontSizeValue = 14,
+                BaseColor = System.Windows.Media.Brushes.White,
+                HighlightColor = System.Windows.Media.Brushes.DeepSkyBlue,
+                ContextColor = System.Windows.Media.Brushes.Gray,
+                Progress = 0.5,
+            };
+
+            line.Measure(new System.Windows.Size(width, height));
+            line.Arrange(new System.Windows.Rect(0, 0, width, height));
+            line.UpdateLayout();
+
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                width, height, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            rtb.Render(line);
+
+            var pixels = new byte[width * height * 4];
+            rtb.CopyPixels(pixels, width * 4, 0);
+
+            // The translation is the last row, so scan only the bottom band: the two text
+            // rows are laid out as a block, and 60% of the height falls below the first.
+            int bandTop = (int)(height * 0.6);
+            int minX = int.MaxValue, maxX = int.MinValue, inkRows = 0;
+            for (int y = bandTop; y < height; y++)
+            {
+                bool rowHasInk = false;
+                for (int x = 0; x < width; x++)
+                {
+                    int alpha = pixels[((y * width) + x) * 4 + 3];
+                    if (alpha <= 8) continue;
+
+                    rowHasInk = true;
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                }
+
+                if (rowHasInk) inkRows++;
+            }
+
+            if (inkRows == 0 || minX > maxX)
+            {
+                Check("translation row rendered", false, "no ink found in the bottom band");
+                return;
+            }
+
+            double centre = (minX + maxX) / 2.0;
+            double offset = Math.Abs(centre - (width / 2.0));
+            int span = maxX - minX;
+
+            output.WriteLine($"  bottom-band ink spans x={minX}..{maxX} (width {span}), " +
+                              $"centre={centre:F1} vs control centre {width / 2.0}, offset={offset:F1}px");
+
+            Check("translation row rendered", inkRows > 0, $"{inkRows} rows");
+
+            // Guards against the earlier false pass, where the band caught the original.
+            Check("measured the translation, not the original", span > 120, $"width {span}px");
+
+            Check("translation is centred on the control", offset <= 6, $"{offset:F1}px off");
+        }
+        catch (Exception ex)
+        {
+            Check("translation centring rendered", false, ex.GetType().Name + ": " + ex.Message);
+        }
+        finally
+        {
+            passed += ok;
+            failed += bad;
+        }
     }
 
     /// <summary>

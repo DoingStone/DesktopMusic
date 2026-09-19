@@ -33,18 +33,80 @@ internal static class Program
             "watch" => await WatchAsync(media, resolver),
             "selftest" => SelfTest(),
             "position" => await PositionProbeAsync(media, args),
+            "qrc" => await QrcProbeAsync(args),
             _ => Usage(),
         };
     }
 
+    /// <summary>
+    /// Fetch a song's QRC straight from QQ, decrypt it, and report whether real
+    /// per-word timing came out. This is the only way to prove the decryption matches
+    /// the server rather than merely round-tripping with itself.
+    /// </summary>
+    private static async Task<int> QrcProbeAsync(string[] args)
+    {
+        var query = args.Length > 1 ? string.Join(' ', args[1..]) : "夜曲 周杰伦";
+        Console.WriteLine($"检索: {query}");
+
+        var provider = new QqMusicProvider();
+        var results = await provider.SearchAsync(
+            new PlaybackSnapshot("qq", "qq", query, "", "", TimeSpan.Zero, TimeSpan.Zero, false, DateTimeOffset.Now),
+            CancellationToken.None);
+
+        if (results.Count() == 0)
+        {
+            Console.WriteLine("  没有搜索结果");
+            return 1;
+        }
+
+        var candidate = results[0];
+        Console.WriteLine($"  选中: {candidate.Title} — {candidate.Artist}  ({candidate.SourceId})");
+        Console.WriteLine();
+
+        var doc = await provider.FetchAsync(candidate, CancellationToken.None);
+
+        int withSyllables = doc.Lines.Count(l => l.Syllables.Count > 0);
+        int totalSyllables = doc.Lines.Sum(l => l.Syllables.Count);
+
+        Console.WriteLine($"来源     : {doc.Source}");
+        Console.WriteLine($"行数     : {doc.Lines.Count}");
+        Console.WriteLine($"逐字行数 : {withSyllables}");
+        Console.WriteLine($"逐字总数 : {totalSyllables}");
+        Console.WriteLine();
+
+        Console.WriteLine($"解密诊断 : {QrcDecryptor.LastDiagnostic}");
+        Console.WriteLine();
+        if (withSyllables == 0)
+        {
+            Console.WriteLine("结果: 未取得逐字时间轴（回退到行级 LRC）");
+            return 1;
+        }
+
+        Console.WriteLine("结果: 逐字时间轴已解密成功");
+        Console.WriteLine();
+        Console.WriteLine("前 3 行的逐字时间轴:");
+        foreach (var line in doc.Lines.Where(l => l.Syllables.Count > 0).Take(3))
+        {
+            Console.WriteLine($"  [{line.Start:mm\\:ss\\.fff}] {line.Text}");
+            foreach (var s in line.Syllables.Take(6))
+            {
+                Console.WriteLine($"      {s.Start:mm\\:ss\\.fff} +{s.Duration.TotalMilliseconds,6:F0}ms  '{s.Text}'");
+            }
+        }
+
+        return 0;
+    }
+
     private static int Usage()
     {
-        Console.WriteLine("用法: tblc [now|watch|selftest|position]");
+        Console.WriteLine("用法: tblc [now|watch|selftest|position|qrc]");
         Console.WriteLine("  now       打印当前曲目、各歌词源命中与当前歌词");
         Console.WriteLine("  watch     持续滚动当前歌词（模拟任务栏）");
         Console.WriteLine("  selftest  歌词解析/匹配/进度外推的离线校验");
         Console.WriteLine("  position [次数] [间隔ms]");
         Console.WriteLine("            只读 SMTC 进度，用于测量同步漂移（不联网）");
+        Console.WriteLine("  qrc [关键词]");
+        Console.WriteLine("            拉取并解密 QQ 逐字歌词，验证逐字时间轴");
         Console.WriteLine();
         Console.WriteLine("设置读写校验请运行: TaskbarLyrics.exe --selftest");
         return 1;
@@ -454,6 +516,21 @@ internal static class Program
             Check("long line gets more time than the short one",
                 longLine.SungDuration > first.SungDuration);
         }
+
+        Console.WriteLine();
+        Console.WriteLine("=== QRC decryption ===");
+        // Round-trip: compress and encrypt with the same key schedule, then decrypt.
+        // This proves the DES port and its key schedule are self-consistent without
+        // touching the network, and it is the part most likely to be subtly wrong.
+        const string sample = "[ti:test]\n[0,1000](0,300,0)hello (300,700,0)world";
+        var sealedBytes = QrcDecryptor.EncryptForTest(sample);
+        Check("qrc encrypt produces whole blocks", sealedBytes.Length % 8 == 0,
+            sealedBytes.Length.ToString());
+        var opened = QrcDecryptor.TryDecrypt(sealedBytes);
+        Check("qrc round-trip recovers the text", opened == sample,
+            opened is null ? "null" : $"len={opened.Length}");
+        Check("garbage is rejected rather than throwing",
+            QrcDecryptor.TryDecrypt(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }) is null);
 
         Console.WriteLine();
         Console.WriteLine($"self-test: {passed} passed, {failed} failed");

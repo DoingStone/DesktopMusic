@@ -427,12 +427,20 @@ public sealed class KaraokeLine : FrameworkElement
         _measuredTextWidth = main.Width;
 
         // Horizontal placement:
-        //   fits      -> centred, as before
+        //   fits      -> centred within the control
         //   overflows -> left-aligned and scrolled
         // Centring an over-wide line made it spill out of both sides and overlap the
         // transport buttons; scrolling keeps the whole line reachable instead.
-        var overflow = main.Width - ActualWidth;
-        var left = overflow > 1 ? -_scrollOffset : (ActualWidth - main.Width) / 2.0;
+        var scrolling = main.Width - ActualWidth > 1;
+
+        // Each row is centred on its own width. Deriving the translation's position from
+        // the original line's width left it aligned to that line's left edge, which reads
+        // as left-shifted whenever the translation is the shorter of the two.
+        double LeftFor(FormattedText text) =>
+            scrolling ? -_scrollOffset : (ActualWidth - text.Width) / 2.0;
+
+        var left = LeftFor(main);
+        var subLeft = sub is null ? left : LeftFor(sub);
 
         // Clip to the control so an in-flight scroll can never paint outside the
         // lyric column.
@@ -447,7 +455,7 @@ public sealed class KaraokeLine : FrameworkElement
 
                 if (sub is not null)
                 {
-                    DrawAt(dc, sub, left, top + main.Height + 1, ContextColor,
+                    DrawAt(dc, sub, subLeft, top + main.Height + 1, ContextColor,
                         typeface, TranslationFontSizeValue, dpi);
                 }
 
@@ -465,7 +473,7 @@ public sealed class KaraokeLine : FrameworkElement
 
                 if (sub is not null)
                 {
-                    DrawAt(dc, sub, left, top + main.Height + 1, ContextColor,
+                    DrawAt(dc, sub, subLeft, top + main.Height + 1, ContextColor,
                         typeface, TranslationFontSizeValue, dpi);
                 }
 
@@ -491,7 +499,7 @@ public sealed class KaraokeLine : FrameworkElement
                 // Shares the highlight once the line is under way, and scrolls with
                 // the original so the two rows stay aligned.
                 var translationBrush = progress > 0.02 ? HighlightColor : BaseColor;
-                DrawAt(dc, sub, left, top + main.Height + 1, translationBrush,
+                DrawAt(dc, sub, subLeft, top + main.Height + 1, translationBrush,
                     typeface, TranslationFontSizeValue, dpi);
             }
         }

@@ -106,6 +106,15 @@ public partial class SettingsWindow : Window
         ValidateHotkeys();
     }
 
+    /// <summary>Window caption buttons for the merged title bar.</summary>
+    private void OnMinimise(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState.Minimized;
+
+    private void OnMaximise(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+
     /// <summary>Shown on the About page.</summary>
     private static string AppVersion =>
         typeof(SettingsWindow).Assembly.GetName().Version is { } v

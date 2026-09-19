@@ -132,6 +132,69 @@ public sealed class QqMusicProvider : ILyricProvider
 
     public async Task<LyricDocument> FetchAsync(LyricCandidate candidate, CancellationToken ct)
     {
+        // QRC would carry per-word timing, which is what lets the highlight follow a
+        // singer who rushes or drags. It is opt-in because the payload this endpoint
+        // returns does not open with the published .qrc scheme: our 3DES port reproduces
+        // the reference implementation byte-for-byte, and the reference itself fails on
+        // this payload too (see QrcDecryptor and tools/qrc-*.py). Until the container is
+        // identified the attempt costs an extra request and cannot succeed, so it is off
+        // by default.
+        if (WordTimingEnabled)
+        {
+            var qrc = await TryFetchQrcAsync(candidate, ct).ConfigureAwait(false);
+            if (qrc is not null) return qrc;
+        }
+
+        return await FetchLrcAsync(candidate, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether to attempt the word-timed QRC fetch. Enabled with <c>TBL_QQ_QRC=1</c>,
+    /// so the default path costs one request per song instead of two.
+    /// </summary>
+    internal static bool WordTimingEnabled =>
+        Environment.GetEnvironmentVariable("TBL_QQ_QRC") == "1";
+
+    /// <summary>
+    /// Fetch and decrypt word-timed QRC, or null when the server has none / the format
+    /// changed. Plain LRC still carries the translation, so it is fetched alongside.
+    /// </summary>
+    private async Task<LyricDocument?> TryFetchQrcAsync(LyricCandidate candidate, CancellationToken ct)
+    {
+        try
+        {
+            var (qrcText, transText) = await RequestAsync(candidate, "qrc", qrc: 1, ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(qrcText)) return null;
+
+            // The field is base64 over the raw ciphertext.
+            var cipher = Convert.FromBase64String(qrcText);
+            var plain = QrcDecryptor.TryRead(cipher);
+            if (string.IsNullOrWhiteSpace(plain)) return null;
+
+            var detail = $"QQ音乐(逐字) · {candidate.Title}";
+            return LrcParser.ParseLrc(plain, LyricSourceKind.QqMusic, transText, detail);
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<LyricDocument> FetchLrcAsync(LyricCandidate candidate, CancellationToken ct)
+    {
+        var (lyric, translation) = await RequestAsync(candidate, "lrc", qrc: 0, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(lyric)) return LyricDocument.Empty;
+
+        var detail = $"QQ音乐 · {candidate.Title}";
+        return LrcParser.ParseLrc(lyric, LyricSourceKind.QqMusic, translation, detail);
+    }
+
+    /// <summary>
+    /// Call GetPlayLyricInfo and return the decoded lyric and translation text.
+    /// </summary>
+    private static async Task<(string? Lyric, string? Translation)> RequestAsync(
+        LyricCandidate candidate, string format, int qrc, CancellationToken ct)
+    {
         var request = new
         {
             comm = new { ct = 24, cv = 0 },
@@ -143,39 +206,40 @@ public sealed class QqMusicProvider : ILyricProvider
                 {
                     songMID = candidate.SourceId,
                     songID = 0,
-                    format = "lrc",
-                    qrc = 0,
+                    format,
+                    qrc,
                     trans = 1,
                     roma = 1,
+
+                    // Required. Without crypt=1 the server returns the QRC payload in a
+                    // form the 3DES routine cannot open — decryption yields noise and
+                    // inflate fails. The _t flags and type mirror the reference client.
+                    crypt = 0,
+                    lrc_t = 0,
+                    qrc_t = 0,
+                    roma_t = 0,
+                    trans_t = 0,
+                    type = 1,
                 },
             },
         };
 
         var json = JsonSerializer.Serialize(request);
         var body = await LyricHttp.PostJsonAsync(new Uri(MusicuUrl), json, Referer, ct).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(body)) return LyricDocument.Empty;
+        if (string.IsNullOrWhiteSpace(body)) return (null, null);
 
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            if (!doc.RootElement.TryGetProperty("req", out var req)) return LyricDocument.Empty;
-            if (!req.TryGetProperty("data", out var data)) return LyricDocument.Empty;
+        using var doc = JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("req", out var req)) return (null, null);
+        if (!req.TryGetProperty("data", out var data)) return (null, null);
 
-            var lyricB64 = GetString(data, "lyric");
-            var transB64 = GetString(data, "trans");
+        var lyricRaw = GetString(data, "lyric");
+        var transRaw = GetString(data, "trans");
 
-            var lyric = LyricHttp.TryDecodeBase64(lyricB64);
-            var translation = LyricHttp.TryDecodeBase64(transB64);
+        // QRC comes back as base64 ciphertext and is decoded by the caller; LRC comes
+        // back as base64 text.
+        if (qrc == 1) return (lyricRaw, LyricHttp.TryDecodeBase64(transRaw));
 
-            if (string.IsNullOrWhiteSpace(lyric)) return LyricDocument.Empty;
-
-            var detail = $"QQ音乐 · {candidate.Title}";
-            return LrcParser.ParseLrc(lyric, LyricSourceKind.QqMusic, translation, detail);
-        }
-        catch (JsonException)
-        {
-            return LyricDocument.Empty;
-        }
+        return (LyricHttp.TryDecodeBase64(lyricRaw), LyricHttp.TryDecodeBase64(transRaw));
     }
 
     private static string? GetString(JsonElement el, string name)

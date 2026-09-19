@@ -1,7 +1,9 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using TaskbarLyrics.App.Configuration;
 using TaskbarLyrics.App.Controls;
@@ -147,6 +149,9 @@ public partial class OverlayWindow : Window
 
         TrySetTaskbarAsOwner();
         PlaceOverWindow();
+
+        // Needs the window placed first: it samples the taskbar colour beside the strip.
+        UpdateTransportContrast();
 
         // Re-assert from a dedicated thread. Marshalling through the dispatcher put the
         // recovery behind whatever WPF was rendering, measured as the lyrics staying
@@ -396,6 +401,132 @@ public partial class OverlayWindow : Window
         SetProgress(_lastProgress, _lastDuration);
     }
 
+    /// <summary>
+    /// Keep the transport glyphs and progress readout legible whatever is behind them.
+    /// <para>
+    /// With the readability plate disabled the strip is drawn straight onto the taskbar,
+    /// where the fixed near-white glyphs vanish against a light bar. The taskbar's own
+    /// colour is sampled just outside the strip — those points are not covered by this
+    /// window, so they report the real backdrop — and the glyphs flip to dark or light
+    /// accordingly, always with an opposite-coloured halo so they also survive a
+    /// gradient or a wallpaper edge.
+    /// </para>
+    /// </summary>
+    private void UpdateTransportContrast()
+    {
+        // With the plate on, the backdrop is our own dark fill, so the light glyphs are
+        // already right and sampling the taskbar would give the wrong answer.
+        if (_settings.ShowBackground)
+        {
+            ApplyTransportColors(Colors.White, Colors.Black);
+            return;
+        }
+
+        double? luminance = SampleBackdropLuminance();
+
+        if (luminance is > 0.55)
+        {
+            ApplyTransportColors(Color.FromRgb(0x14, 0x14, 0x14), Colors.White);
+        }
+        else
+        {
+            // Dark backdrop, or no reading at all: light glyphs, which the halo keeps
+            // readable either way.
+            ApplyTransportColors(Colors.White, Colors.Black);
+        }
+    }
+
+    private void ApplyTransportColors(Color glyph, Color halo)
+    {
+        var brush = new SolidColorBrush(glyph);
+        brush.Freeze();
+
+        foreach (var button in new[] { PrevButton, PlayPauseButton, NextButton })
+        {
+            button.Foreground = brush;
+
+            // ShadowDepth 0 with a small blur is a halo rather than a shadow: it
+            // outlines the glyph instead of offsetting it.
+            button.Effect = new DropShadowEffect
+            {
+                Color = halo,
+                ShadowDepth = 0,
+                BlurRadius = 3,
+                Opacity = 0.9,
+            };
+        }
+
+        var textBrush = new SolidColorBrush(Color.FromArgb(0xE6, glyph.R, glyph.G, glyph.B));
+        textBrush.Freeze();
+        ProgressText.Foreground = textBrush;
+        ProgressText.Effect = new DropShadowEffect
+        {
+            Color = halo,
+            ShadowDepth = 0,
+            BlurRadius = 3,
+            Opacity = 0.9,
+        };
+    }
+
+    /// <summary>
+    /// Average brightness (0..1) of the taskbar immediately left and right of the strip,
+    /// or null when neither side could be read.
+    /// </summary>
+    private double? SampleBackdropLuminance()
+    {
+        if (_taskbar is null || !_positioned) return null;
+
+        var scale = _taskbar.Scale <= 0 ? 1.0 : _taskbar.Scale;
+
+        // Physical pixels: the screen DC knows nothing of WPF's DIP coordinates.
+        int left = (int)Math.Round(Left * scale) - 24;
+        int right = (int)Math.Round((Left + ActualWidth) * scale) + 24;
+        int y = (int)Math.Round((Top + (ActualHeight / 2)) * scale);
+
+        var hdc = GetDC(IntPtr.Zero);
+        if (hdc == IntPtr.Zero) return null;
+
+        try
+        {
+            double total = 0;
+            int samples = 0;
+
+            foreach (var x in new[] { left, right })
+            {
+                // Only sample points that are genuinely on the taskbar band.
+                if (x < _taskbar.Bounds.Left + 2 || x > _taskbar.Bounds.Right - 2) continue;
+                if (y < _taskbar.Bounds.Top || y > _taskbar.Bounds.Bottom) continue;
+
+                uint pixel = GetPixel(hdc, x, y);
+                if (pixel == ClrInvalid) continue;
+
+                int r = (int)(pixel & 0xFF);
+                int g = (int)((pixel >> 8) & 0xFF);
+                int b = (int)((pixel >> 16) & 0xFF);
+
+                total += ((0.2126 * r) + (0.7152 * g) + (0.0722 * b)) / 255.0;
+                samples++;
+            }
+
+            return samples == 0 ? null : total / samples;
+        }
+        finally
+        {
+            ReleaseDC(IntPtr.Zero, hdc);
+        }
+    }
+
+    private const uint ClrInvalid = 0xFFFFFFFF;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetDC(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll")]
+    private static extern uint GetPixel(IntPtr hdc, int x, int y);
+
     private void OnPlayPauseClicked(object sender, RoutedEventArgs e) =>
         PlayPauseRequested?.Invoke(this, EventArgs.Empty);
 
@@ -476,6 +607,9 @@ public partial class OverlayWindow : Window
         // Explorer may have restarted and recreated the taskbar, which would leave
         // us parented to a dead window; re-assert the embedding.
         TrySetTaskbarAsOwner();
+
+        // Slow re-evaluation so a wallpaper or taskbar colour change is picked up.
+        UpdateTransportContrast();
 
         // The taskbar re-asserts itself as topmost whenever it is clicked or
         // activated, which silently pushes this window down inside the topmost
