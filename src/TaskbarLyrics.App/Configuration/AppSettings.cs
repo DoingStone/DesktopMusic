@@ -144,6 +144,21 @@ public sealed class AppSettings
     /// <summary>Progress bar fill colour.</summary>
     public string ProgressBarColor { get; set; } = "#FF3ABEFF";
 
+    /// <summary>
+    /// Colour theme for the settings window: <c>system</c>, <c>light</c> or <c>dark</c>.
+    /// </summary>
+    public string Theme { get; set; } = "system";
+
+    /// <summary>
+    /// Use the Mica backdrop where available. Kept switchable because a material that
+    /// fails to composite cannot be detected from inside the process, so the solid
+    /// palette must stay reachable without a rebuild.
+    /// </summary>
+    public bool UseMica { get; set; } = true;
+
+    /// <summary>Whether the settings navigation pane is collapsed.</summary>
+    public bool NavCollapsed { get; set; }
+
     /// <summary>Remembered position, keyed per monitor+taskbar signature.</summary>
     public Dictionary<string, PositionMemory> Positions { get; set; } = new();
 

@@ -72,26 +72,26 @@
         <SolidColorBrush x:Key="NavItemHover" Color="#14000000" />
 
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg}" />
         </Style>
 
 
         <Style TargetType="GroupBox">
-            <Setter Property="Foreground" Value="{StaticResource FgHeading}" />
+            <Setter Property="Foreground" Value="{DynamicResource FgHeading}" />
             <Setter Property="Margin" Value="0,0,0,10" />
             <Setter Property="Padding" Value="12,10,12,12" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="GroupBox">
-                        <Border Background="{StaticResource Card}"
-                                BorderBrush="{StaticResource CardBorder}"
+                        <Border Background="{DynamicResource Card}"
+                                BorderBrush="{DynamicResource CardBorder}"
                                 BorderThickness="1"
                                 CornerRadius="8">
                             <StackPanel>
                                 <TextBlock Text="{TemplateBinding Header}"
                                            Margin="{TemplateBinding Padding}"
                                            FontWeight="SemiBold"
-                                           Foreground="{StaticResource FgHeading}" />
+                                           Foreground="{DynamicResource FgHeading}" />
                                 <ContentPresenter Margin="12,0,12,12" />
                             </StackPanel>
                         </Border>
@@ -103,9 +103,9 @@
         <Style TargetType="ComboBox">
             <Setter Property="Padding" Value="8,4" />
             <Setter Property="Margin" Value="0,2" />
-            <Setter Property="Foreground" Value="{StaticResource Fg}" />
-            <Setter Property="Background" Value="{StaticResource ControlFill}" />
-            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg}" />
+            <Setter Property="Background" Value="{DynamicResource ControlFill}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
         </Style>
 
         <!--
@@ -120,8 +120,8 @@
             <Setter Property="Padding" Value="14,6" />
             <Setter Property="Margin" Value="6,0,0,0" />
             <Setter Property="MinWidth" Value="80" />
-            <Setter Property="Foreground" Value="{StaticResource Fg}" />
-            <Setter Property="Background" Value="{StaticResource ControlFill}" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg}" />
+            <Setter Property="Background" Value="{DynamicResource ControlFill}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -129,7 +129,7 @@
                         <Border x:Name="Chrome"
                                 CornerRadius="5"
                                 Background="{TemplateBinding Background}"
-                                BorderBrush="{StaticResource ControlBorder}"
+                                BorderBrush="{DynamicResource ControlBorder}"
                                 BorderThickness="1">
                             <ContentPresenter Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="Center"
@@ -137,7 +137,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource ControlHover}" />
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ControlHover}" />
                                 <Setter TargetName="Chrome" Property="BorderBrush" Value="#FFB8B8B8" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
@@ -154,21 +154,21 @@
 
         <Style x:Key="SettingLabel" TargetType="TextBlock">
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg}" />
             <Setter Property="Margin" Value="0,0,10,0" />
         </Style>
 
         <Style TargetType="TextBox">
             <Setter Property="Padding" Value="8,4" />
-            <Setter Property="Foreground" Value="{StaticResource Fg}" />
-            <Setter Property="CaretBrush" Value="{StaticResource Fg}" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource Fg}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
                         <Border x:Name="Bd"
                                 CornerRadius="4"
                                 Background="#FFFFFFFF"
-                                BorderBrush="{StaticResource Line}"
+                                BorderBrush="{DynamicResource Line}"
                                 BorderThickness="1">
                             <ScrollViewer x:Name="PART_ContentHost"
                                           Margin="{TemplateBinding Padding}"
@@ -176,7 +176,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}" />
                                 <Setter TargetName="Bd" Property="BorderThickness" Value="2" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -191,7 +191,7 @@
           a tick. 44x20 track, 12 px knob.
         -->
         <Style TargetType="CheckBox">
-            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg}" />
             <Setter Property="Margin" Value="0,2" />
             <Setter Property="Padding" Value="0,9" />
             <Setter Property="Cursor" Value="Hand" />
@@ -226,14 +226,14 @@
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Track" Property="Background" Value="{StaticResource Accent}" />
-                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Track" Property="Background" Value="{DynamicResource Accent}" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource Accent}" />
                                 <Setter TargetName="Knob" Property="Fill" Value="White" />
                                 <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right" />
                                 <Setter TargetName="Knob" Property="Margin" Value="0,0,3,0" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource Accent}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="Track" Property="Opacity" Value="0.4" />
@@ -255,7 +255,7 @@
             <Setter Property="Padding" Value="0" />
             <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" />
             <Setter Property="FontSize" Value="10" />
-            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Focusable" Value="False" />
             <Setter Property="Template">
@@ -316,8 +316,8 @@
                                 <Setter TargetName="Pill" Property="Background" Value="{DynamicResource NavItemHover}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Pill" Property="Background" Value="{StaticResource Accent}" />
-                                <Setter TargetName="Bar" Property="Background" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Pill" Property="Background" Value="{DynamicResource Accent}" />
+                                <Setter TargetName="Bar" Property="Background" Value="{DynamicResource Accent}" />
                                 <Setter Property="Foreground" Value="White" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -344,7 +344,7 @@
         <Style x:Key="PageHeading" TargetType="TextBlock">
             <Setter Property="FontSize" Value="26" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{StaticResource Fg}" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg}" />
         </Style>
 
 
@@ -370,7 +370,7 @@
                                                     <Ellipse Fill="#FFFAFAFA"
                                                              Stroke="#FF8A8A8A"
                                                              StrokeThickness="1" />
-                                                    <Ellipse Fill="{StaticResource Accent}"
+                                                    <Ellipse Fill="{DynamicResource Accent}"
                                                              Margin="6"
                                                              x:Name="Inner" />
                                                 </Grid>
@@ -393,7 +393,7 @@
                                         <RepeatButton.Template>
                                             <ControlTemplate TargetType="RepeatButton">
                                                 <Border Height="4" CornerRadius="2"
-                                                        Background="{StaticResource Accent}"
+                                                        Background="{DynamicResource Accent}"
                                                         VerticalAlignment="Center" />
                                             </ControlTemplate>
                                         </RepeatButton.Template>
@@ -450,7 +450,7 @@
           rather than as classic WPF.
         -->
         <Style TargetType="TabItem">
-            <Setter Property="Foreground" Value="{StaticResource FgMuted}" />
+            <Setter Property="Foreground" Value="{DynamicResource FgMuted}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -466,7 +466,7 @@
                                     Height="2.5"
                                     Width="18"
                                     CornerRadius="1.5"
-                                    Background="{StaticResource Accent}"
+                                    Background="{DynamicResource Accent}"
                                     VerticalAlignment="Bottom"
                                     HorizontalAlignment="Center"
                                     Margin="0,0,0,2"
@@ -475,7 +475,7 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="Underline" Property="Visibility" Value="Visible" />
-                                <Setter Property="Foreground" Value="{StaticResource Fg}" />
+                                <Setter Property="Foreground" Value="{DynamicResource Fg}" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -526,20 +526,31 @@
           instead of a caption bolted on top.
         -->
         <Border Grid.Row="0" Background="{DynamicResource NavBg}" />
-        <Border Grid.Row="0" Background="{DynamicResource ContentBg}" Margin="232,0,0,0" />
+        <Border x:Name="TitleFiller" Grid.Row="0" Background="{DynamicResource ContentBg}" Margin="232,0,0,0" />
+
+        <Button x:Name="NavToggleButton"
+                Grid.Row="0"
+                HorizontalAlignment="Left" VerticalAlignment="Center"
+                Margin="8,0,0,0"
+                Content="&#xE700;"
+                Click="OnToggleNav"
+                ToolTip="收起 / 展开左侧栏"
+                Style="{StaticResource CaptionButton}"
+                Width="40"
+                WindowChrome.IsHitTestVisibleInChrome="True" />
 
         <StackPanel Grid.Row="0" Orientation="Horizontal"
-                    Margin="18,0,0,0" VerticalAlignment="Center">
+                    Margin="54,0,0,0" VerticalAlignment="Center">
             <Image x:Name="AppIconImage" Width="20" Height="20"
                    RenderOptions.BitmapScalingMode="HighQuality" />
             <TextBlock Text="任务栏歌词"
                        Margin="10,0,0,0" VerticalAlignment="Center"
                        FontSize="12.5" FontWeight="SemiBold"
-                       Foreground="{StaticResource Fg}" />
+                       Foreground="{DynamicResource Fg}" />
         </StackPanel>
 
         <StackPanel Grid.Row="0" Orientation="Horizontal"
-                    HorizontalAlignment="Right" VerticalAlignment="Center"
+                    HorizontalAlignment="Right" VerticalAlignment="Top"
                     WindowChrome.IsHitTestVisibleInChrome="True">
             <Button x:Name="MinimiseButton" Content="&#xE921;" Click="OnMinimise"
                     Style="{StaticResource CaptionButton}" ToolTip="最小化" />
@@ -552,12 +563,16 @@
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <!-- Navigation pane, as in the Windows 11 Settings reference. -->
-                <ColumnDefinition Width="232" />
+                <ColumnDefinition x:Name="NavColumn" Width="232" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
             <!-- ==================== 侧边导航 ==================== -->
-            <Border Grid.Column="0" Background="{DynamicResource NavBg}">
+            <Border x:Name="NavPane"
+                    Grid.Column="0"
+                    Background="{DynamicResource NavBg}"
+                    BorderBrush="{DynamicResource Line}"
+                    BorderThickness="0,0,1,0">
                 <DockPanel>
 
                     <ListBox x:Name="NavList"
@@ -663,7 +678,7 @@
                                Margin="32,26,32,0" />
 
                     <Border Grid.Row="1" Height="1"
-                            Background="{StaticResource Line}"
+                            Background="{DynamicResource Line}"
                             Margin="32,18,32,0" />
 
                     <ScrollViewer Grid.Row="2"
@@ -709,6 +724,30 @@
 
                             <!-- ============ 外观 ============ -->
                             <StackPanel x:Name="PageAppearance" Visibility="Collapsed">
+                                <GroupBox Header="鐣岄潰澶栬">
+                                    <StackPanel>
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="110" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="涓婚" Style="{StaticResource SettingLabel}" />
+                                            <ComboBox x:Name="ThemeCombo" Grid.Column="1"
+                                                      SelectionChanged="OnThemeChanged">
+                                                <ComboBoxItem Content="跟随系统" />
+                                                <ComboBoxItem Content="浅色" />
+                                                <ComboBoxItem Content="深色" />
+                                            </ComboBox>
+                                        </Grid>
+                                        <CheckBox x:Name="MicaCheck"
+                                                  Content="使用云母（Mica）背景材质"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="NavCollapsedCheck"
+                                                  Content="启动时收起左侧栏"
+                                                  Click="OnOptionChanged" />
+                                    </StackPanel>
+                                </GroupBox>
+
                                 <GroupBox Header="字体">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
@@ -944,7 +983,7 @@
                                 <GroupBox Header="微调位置">
                                     <StackPanel>
                                         <TextBlock Text="歌词条可直接用鼠标拖动（需在「常规」中开启「歌词可拖动」）；也可用下面的按钮精确微调。"
-                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   Foreground="{DynamicResource FgMuted}" FontSize="11"
                                                    Margin="0,0,0,10" TextWrapping="Wrap" />
                                         <UniformGrid Columns="4">
                                             <Button Content="← 左移" Click="OnMoveLeft" />
@@ -963,7 +1002,7 @@
                                 <GroupBox Header="在线歌词来源">
                                     <StackPanel>
                                         <TextBlock Text="多个来源会并发检索，再按标题、歌手、时长打分择优。"
-                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   Foreground="{DynamicResource FgMuted}" FontSize="11"
                                                    TextWrapping="Wrap" Margin="0,0,0,8" />
                                         <CheckBox x:Name="QqMusicCheck" Content="QQ音乐（中文曲库最全）"
                                                   Click="OnProviderChanged" />
@@ -977,7 +1016,7 @@
                                 <GroupBox Header="缓存与匹配">
                                     <StackPanel>
                                         <TextBlock Text="换歌后歌词不正确时，可先「重新匹配」；仍不对则清空缓存再试。"
-                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   Foreground="{DynamicResource FgMuted}" FontSize="11"
                                                    TextWrapping="Wrap" Margin="0,0,0,10" />
                                         <StackPanel Orientation="Horizontal">
                                             <Button Content="重新匹配当前歌曲" Click="OnRematch" Margin="0" />
@@ -989,7 +1028,7 @@
                                 <GroupBox Header="诊断">
                                     <StackPanel>
                                         <TextBlock Text="用于排查问题：显示当前曲目、各歌词源命中与歌词匹配结果。"
-                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   Foreground="{DynamicResource FgMuted}" FontSize="11"
                                                    TextWrapping="Wrap" Margin="0,0,0,10" />
                                         <Button Content="查看当前歌词匹配详情" Click="OnShowDiagnostics"
                                                 HorizontalAlignment="Left" Margin="0" />
@@ -1002,7 +1041,7 @@
                                 <GroupBox Header="立即控制当前播放器">
                                     <StackPanel>
                                         <TextBlock Text="命令会发送给正在为歌词提供播放信息的那个播放器。若播放器未开放相应控件，按钮会提示不支持。"
-                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   Foreground="{DynamicResource FgMuted}" FontSize="11"
                                                    TextWrapping="Wrap" Margin="0,0,0,10" />
                                         <UniformGrid Columns="3">
                                             <Button Content="⏮  上一首" Click="OnTransportPrevious" />
@@ -1015,7 +1054,7 @@
                                 <GroupBox Header="全局快捷键">
                                     <StackPanel>
                                         <TextBlock Text="快捷键在系统范围内生效，因此不必让歌词框接收鼠标点击。留空即可关闭某一项。格式示例：Ctrl+Alt+Space、Ctrl+Alt+Right。"
-                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   Foreground="{DynamicResource FgMuted}" FontSize="11"
                                                    TextWrapping="Wrap" Margin="0,0,0,10" />
 
                                         <Grid>
@@ -1055,7 +1094,7 @@
 
                                 <GroupBox Header="拖动说明">
                                     <TextBlock Text="在「常规」中开启「歌词可拖动」后，即可直接用鼠标拖动任务栏上的歌词框来调整位置；位置会自动保存。关闭后恢复点击穿透，不会挡住任务栏操作。"
-                                               Foreground="{StaticResource FgMuted}" FontSize="11" TextWrapping="Wrap" />
+                                               Foreground="{DynamicResource FgMuted}" FontSize="11" TextWrapping="Wrap" />
                                 </GroupBox>
                             </StackPanel>
 
@@ -1064,28 +1103,28 @@
                                 <GroupBox Header="关于本程序">
                                     <StackPanel>
                                         <TextBlock x:Name="AboutVersionText"
-                                                   Foreground="{StaticResource Fg}" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource Fg}" FontWeight="SemiBold"
                                                    Margin="0,0,0,6" />
                                         <TextBlock Text="在 Windows 任务栏的空白区域显示当前播放歌曲的歌词，支持逐字高亮、翻译、歌曲进度与播放控制。"
-                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   Foreground="{DynamicResource FgMuted}" FontSize="11"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                 </GroupBox>
 
                                 <GroupBox Header="链接">
                                     <StackPanel>
-                                        <TextBlock Text="项目主页与问题反馈" Foreground="{StaticResource Fg}"
+                                        <TextBlock Text="项目主页与问题反馈" Foreground="{DynamicResource Fg}"
                                                    Margin="0,0,0,4" />
                                         <TextBlock x:Name="AboutRepoText" Foreground="#FF0067C0"
                                                    FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10" />
-                                        <TextBlock Text="许可证：MIT" Foreground="{StaticResource FgMuted}" FontSize="11" />
+                                        <TextBlock Text="许可证：MIT" Foreground="{DynamicResource FgMuted}" FontSize="11" />
                                     </StackPanel>
                                 </GroupBox>
 
                                 <GroupBox Header="配置文件">
                                     <StackPanel>
                                         <TextBlock Text="修改后点「保存」写入下面的文件；「关闭」会恢复打开设置前的状态。"
-                                                   Foreground="{StaticResource FgMuted}" FontSize="11"
+                                                   Foreground="{DynamicResource FgMuted}" FontSize="11"
                                                    TextWrapping="Wrap" Margin="0,0,0,8" />
                                         <TextBlock x:Name="ConfigPathText"
                                                    Foreground="#FF0067C0" FontSize="11"
@@ -1103,7 +1142,7 @@
         <!-- ==================== 底部操作栏 ==================== -->
         <Border Grid.Row="2"
                 Background="{DynamicResource ContentBg}"
-                BorderBrush="{StaticResource Line}"
+                BorderBrush="{DynamicResource Line}"
                 BorderThickness="0,1,0,0">
             <Grid Margin="18,12,18,14">
                 <Grid.ColumnDefinitions>

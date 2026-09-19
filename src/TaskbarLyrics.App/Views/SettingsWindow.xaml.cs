@@ -71,7 +71,7 @@ public partial class SettingsWindow : Window
             // and the solid Settings background. No Mica — it needs the client area
             // merged into the frame, and without that a transparent client area
             // renders black (the previous bug).
-            Interop.FluentChrome.Apply(this);
+            Interop.FluentChrome.Apply(this, _working.Theme, _working.UseMica);
         };
 
         _original = settings.Clone();
@@ -99,6 +99,19 @@ public partial class SettingsWindow : Window
         AboutVersionText.Text = $"任务栏歌词 {AppVersion}";
         AboutRepoText.Text = "https://github.com/DoingStone/DesktopMusic";
         NavList.SelectedIndex = 0;
+
+        // Collapse state, theme and material live in the working copy, so a dialog with
+        // unsaved changes still shows what the user last chose.
+        ApplyNavCollapsed(_working.NavCollapsed, persist: false);
+
+        ThemeCombo.SelectedIndex = _working.Theme switch
+        {
+            Interop.FluentChrome.ThemeLight => 1,
+            Interop.FluentChrome.ThemeDark => 2,
+            _ => 0,
+        };
+        MicaCheck.IsChecked = _working.UseMica;
+        NavCollapsedCheck.IsChecked = _working.NavCollapsed;
 
         // XAML loading and the initial value push are done; user edits may now
         // apply live.
@@ -134,6 +147,47 @@ public partial class SettingsWindow : Window
         ("播放控制", PagePlayback),
         ("关于", PageAbout),
     };
+
+    /// <summary>
+    /// Collapse or expand the navigation pane, keeping the title row's filler in step so
+    /// the app identity stays aligned with the content edge.
+    /// </summary>
+    private void OnToggleNav(object sender, RoutedEventArgs e) =>
+        ApplyNavCollapsed(!_working.NavCollapsed, persist: true);
+
+    private void ApplyNavCollapsed(bool collapsed, bool persist)
+    {
+        _working.NavCollapsed = collapsed;
+
+        NavColumn.Width = collapsed ? new GridLength(0) : new GridLength(232);
+        NavPane.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        TitleFiller.Margin = collapsed ? new Thickness(0) : new Thickness(232, 0, 0, 0);
+
+        if (NavCollapsedCheck is not null) NavCollapsedCheck.IsChecked = collapsed;
+
+        if (persist)
+        {
+            _applyLive(_working);
+            SetStatus(collapsed ? "左侧栏已收起" : "左侧栏已展开");
+        }
+    }
+
+    /// <summary>Theme changed: re-apply the window chrome immediately.</summary>
+    private void OnThemeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading) return;
+
+        _working.Theme = ThemeCombo.SelectedIndex switch
+        {
+            1 => Interop.FluentChrome.ThemeLight,
+            2 => Interop.FluentChrome.ThemeDark,
+            _ => Interop.FluentChrome.ThemeSystem,
+        };
+
+        Interop.FluentChrome.Apply(this, _working.Theme, _working.UseMica);
+        _applyLive(_working);
+        SetStatus("主题已更新");
+    }
 
     private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -398,6 +452,8 @@ public partial class SettingsWindow : Window
         _working.Visible = VisibleCheck.IsChecked == true;
         _working.ShowWhenPaused = ShowWhenPausedCheck.IsChecked == true;
         _working.HideWhenNoLyrics = HideWhenNoLyricsCheck.IsChecked == true;
+        _working.UseMica = MicaCheck.IsChecked == true;
+        _working.NavCollapsed = NavCollapsedCheck.IsChecked == true;
         _working.GlobalOffsetMs = (int)Math.Round(OffsetSlider.Value);
 
         // Guarded: assigning these texts raises TextChanged, which would re-enter
@@ -538,7 +594,20 @@ public partial class SettingsWindow : Window
     // ---- live apply ----------------------------------------------------
 
     /// <summary>Checkbox / toggle edits.</summary>
-    private void OnOptionChanged(object sender, RoutedEventArgs e) => ApplyLive();
+    private void OnOptionChanged(object sender, RoutedEventArgs e)
+    {
+        ApplyLive();
+
+        // Material and collapse state are properties of this window, so they have to be
+        // pushed to it rather than only written to the settings file.
+        Interop.FluentChrome.Apply(this, _working.Theme, _working.UseMica);
+
+        if (NavCollapsedCheck is not null && NavCollapsedCheck.IsChecked != _working.NavCollapsed)
+        {
+            ApplyNavCollapsed(_working.NavCollapsed, persist: false);
+        }
+    }
+
 
     /// <summary>Colour picker edits (ColorField raises a plain CLR event).</summary>
     private void OnColorChanged(object? sender, EventArgs e) => ApplyLive();
