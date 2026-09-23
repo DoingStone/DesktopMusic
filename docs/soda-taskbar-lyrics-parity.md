@@ -581,4 +581,22 @@ offset=274.5 target=278.1 sung=363.6             progress=0.981
 - **判据教训**：不能用「接近最大跨度的行数」区分圆与矩形 —— 35 px 的正圆本来就有约 11 行落在 ≥95% 直径内；要比较**首末行宽度**与**平均弦长（π/4）**。
 - 播放/暂停键保持 `TransportButton` 30×30 正圆不变（用户未要求改回汽水的 48×32 胶囊）。
 - `tools\verify-toggle-disc.ps1` 使用契约：要求 app **已带 `--settings` 运行**；脚本会把设置窗临时置顶（`SetWindowPos(HWND_TOPMOST)`）再截屏、结束前恢复（`SetForegroundWindow` 在非前台进程里会被拒，所以用前者）；它自动处理「启动即最小化」（`GetWindowRect` 落在 -32000 哨兵、被 DPI 缩放成 -25600）并 `ShowWindow(SW_RESTORE)`；窗口被遮挡时报 `settings window appears occluded`，而不是给出莫名其妙的 FAIL。
-- 本轮未提交任何内容（工作树是既有 dirty WIP）。
+- 本轮改动已提交并公开上传，见 §11。
+
+## 11. 公开上传：提交 / 变基 / 授权清理
+
+- 目标（用户原话要点）：**上传工程，不要涉及版权违法内容**。
+- **授权清理（不再分发第三方字体）**：MiSans 子集取自汽水音乐安装包，不随仓库分发 ——
+  - `.gitignore` 增加 `src/TaskbarLyrics.App/Fonts/*.ttf`、`*.otf`、`*.woff2`；
+  - `src\TaskbarLyrics.App\TaskbarLyrics.App.csproj` 的两条字体项（`<Resource>` 与 `<Content>`）都加 `Condition="Exists('$(MSBuildProjectDirectory)\Fonts\MiSans-subset.ttf')"`；
+  - 仓库只保留 `src\TaskbarLyrics.App\Fonts\README.md`：说明目录为空是故意的、自备 ttf 的方法、以及完整的 fontTools 子集化脚本（`instancer.instantiateVariableFont(font, {"wght": 600})` + `subset.main([...])`）；
+  - `README.md` 两处措辞改成「仓库不附带字体文件，需自备」。
+- **字体缺席也必须能构建**（否则新克隆直接红）：把 `MiSans-subset.ttf` 改名后 `dotnet build "src\TaskbarLyrics.App\TaskbarLyrics.App.csproj" --no-restore -c Debug -v q` → **0 警告 0 错误**；放回后同样 0 警告 0 错误 ⇒ `Exists()` 条件生效。
+- 秘密扫描（对将提交的文件与已跟踪文件）：唯一涉及凭据的是 `tools\push-api.ps1`，它在运行时从 Windows 凭据管理器读取 token、只打印长度，**无硬编码密钥**，保留。
+- 提交：本地 `af17c98`，消息写在 `artifacts\commit-msg.txt`（`artifacts/*` 已被 gitignore）并用 `git commit -F` 提交 —— 本机是 **Windows PowerShell 5.1，不支持 heredoc**（`<<'MSG'` 直接解析错误）。
+- **变基**：远端 `main` 已有同主题提交 `1c77d00`，与本地 `e8d87b3` **逐字内容相同、仅行尾不同**（`git diff --ignore-all-space e8d87b3 1c77d00 -- <file>` 为空；仓库 `core.autocrlf=true`，`git ls-files --eol` 显示 `i/mixed`）。`git rebase origin/main` 先撞这个重复提交，`git rebase --skip` 丢掉它、只重放本轮提交。
+- **冲突解法**（仅 `src\TaskbarLyrics.App\Interop\FluentChrome.cs` 与 `src\TaskbarLyrics.App\Views\SettingsWindow.xaml`）：`git checkout af17c98 -- <两个文件>`，然后 `git add` + `GIT_EDITOR=true git rebase --continue`。**不能简单采用远端版本**：本提交对 `FluentChrome.cs` 有真实非空白改动（Mica 与不透明回退的注释和分支，`git diff --ignore-all-space` 可见）。
+- **推送**：`git push origin main` 先报 `fatal: unable to access 'https://github.com/DoingStone/DesktopMusic.git/': Recv failure: Connection was reset`（本机没有配置代理）。加参数重试，第二次成功：
+  `git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 push origin main`
+- 结果：`origin/main = c4fb32bdb03430b478715c9002bdf26bb7bfc2dd`；上传树 **112 个文件**，`.ttf/.otf/.woff2/.node/.asar/.dll/.exe` **零命中**；`Configuration\BundledFonts.cs`、`Controls\TransportButton.cs`、`Fonts\README.md`、`tools\verify-toggle-disc.ps1`、`tools\verify-hover-shift.ps1`、`tools\verify-cluster-modes.ps1` 均在树内。
+- 变基后复核：`SettingsWindow.xaml` :311 `PaneToggleButton` 样式、:713 引用、:935/:938/:941 三个信息开关都在；构建 0 警告 0 错误。

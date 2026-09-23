@@ -159,33 +159,48 @@ Start-Sleep -Milliseconds 700
 $rest = Shot
 
 # The pane's right edge: walk left from the content side until the pane colour holds.
-# Scanned BELOW the header (where the pane is uniform), because in the header itself the
-# app icon and the title sit in the same row and would end the walk early.
-$scanRow = Dip 48
-$paneLuma = Luma $rest.px $rest.stride 6 $scanRow
-$contentLuma = Luma $rest.px $rest.stride ($winW - 8) $scanRow
-if ([Math]::Abs($paneLuma - $contentLuma) -lt 3) {
-    # Distinguishable pane and content tones are what this probe reads; when they are equal
-    # something else is on screen (typically a window covering the settings window).
-    Write-Host ("FAIL: settings window appears occluded (pane luma {0:N0} == content luma {1:N0})" -f $paneLuma, $contentLuma)
-    [void][ToggleProbe]::SetWindowPos($hwnd, [IntPtr](-2), 0, 0, 0, 0, 0x0043)
-    exit 1
-}
+# Scanned BELOW the header (where the pane is uniform) because in the header itself the app
+# icon and the title share the row and would end the walk early. Several rows are tried,
+# because a row that crosses selected / hovered nav items is no longer uniform.
 $paneRight = -1
-for ($x = $winW - 8; $x -ge 60; $x--) {
-    $hit = 0
-    for ($k = 0; $k -lt 3; $k++) {
-        if ([Math]::Abs((Luma $rest.px $rest.stride ($x - $k) $scanRow) - $paneLuma) -le 4) { $hit++ }
+$scanRow = 0
+$paneLuma = 0
+$contentLuma = 0
+foreach ($rowDip in 44, 52, 60, 72, 96, 120, 150) {
+    $row = Dip $rowDip
+    if ($row -ge $winH - 4) { continue }
+    $pL = Luma $rest.px $rest.stride 6 $row
+    $cL = Luma $rest.px $rest.stride ($winW - 8) $row
+    if ([Math]::Abs($pL - $cL) -lt 3) { continue }
+    $edge = -1
+    for ($x = $winW - 8; $x -ge 60; $x--) {
+        $hit = 0
+        for ($k = 0; $k -lt 3; $k++) {
+            if ([Math]::Abs((Luma $rest.px $rest.stride ($x - $k) $row) - $pL) -le 4) { $hit++ }
+        }
+        if ($hit -eq 3) { $edge = $x; break }
     }
-    if ($hit -eq 3) { $paneRight = $x; break }
+    # A plausible pane edge sits in the left quarter of the window (the user's NavWidth is 168 DIP).
+    if ($edge -gt ($winW * 0.08) -and $edge -lt ($winW * 0.5)) {
+        $paneRight = $edge; $scanRow = $row; $paneLuma = $pL; $contentLuma = $cL
+        break
+    }
 }
 if ($paneRight -lt 0) {
-    Write-Host 'FAIL: could not find the nav pane edge'
+    $pL = Luma $rest.px $rest.stride 6 (Dip 60)
+    $cL = Luma $rest.px $rest.stride ($winW - 8) (Dip 60)
+    if ([Math]::Abs($pL - $cL) -lt 3) {
+        # Distinguishable pane and content tones are what this probe reads; when they are equal
+        # something else is on screen (typically a window covering the settings window).
+        Write-Host ("FAIL: settings window appears occluded (pane luma {0:N0} == content luma {1:N0})" -f $pL, $cL)
+    } else {
+        Write-Host ("FAIL: could not find the nav pane edge on any scanned row (pane luma {0:N0}, content luma {1:N0})" -f $pL, $cL)
+    }
     [void][ToggleProbe]::SetWindowPos($hwnd, [IntPtr](-2), 0, 0, 0, 0, 0x0043)
     exit 1
 }
-Write-Host ("nav pane: colour luma {0:N0}, right edge {1} px (= {2:N1} DIP), content luma {3:N0}" -f `
-    $paneLuma, $paneRight, ($paneRight / $scale), $contentLuma)
+Write-Host ("nav pane: colour luma {0:N0}, right edge {1} px (= {2:N1} DIP), content luma {3:N0}, scan row {4} px" -f `
+    $paneLuma, $paneRight, ($paneRight / $scale), $contentLuma, $scanRow)
 
 # --- 2. find the button by hovering candidates ------------------------------
 # The plate is a big filled disc (about 28 DIP across); its glyph is a thin 19x15 DIP
