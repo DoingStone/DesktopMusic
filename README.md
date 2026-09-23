@@ -7,6 +7,8 @@
 
 本项目为**自研实现**，零第三方依赖（只用 .NET 8 + WPF），歌词匹配与解析思路参考了 [TaskbarLyrics](https://github.com/ANYNC/TaskbarLyrics) 与 [Lyricify-Lyrics-Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper)。
 
+**下载**：[最新 Releases](https://github.com/DoingStone/DesktopMusic/releases/latest) → `TaskbarLyrics-win-x64.zip`（免安装，解压即用；需要 [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)）。压缩包**不含字体文件**（字体有独立授权，不由本项目再分发，见下文「字体」说明）。也可以从源码构建：`powershell -ExecutionPolicy Bypass -File scripts\run-app.ps1`。
+
 ---
 
 ## 效果
@@ -142,7 +144,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run-app.ps1
 # 构建
 dotnet build TaskbarLyrics.sln -c Release
 
-# 发布为可分发文件夹 + ZIP（约 25 MB，ZIP 约 6 MB）
+# 发布为可分发文件夹 + ZIP（文件夹约 28 MB，ZIP 约 7 MB；ZIP 默认不含字体，-IncludeFonts 可保留）
 powershell -ExecutionPolicy Bypass -File scripts\publish.ps1
 
 # 免 .NET 运行时的独立版（体积大得多）
@@ -151,6 +153,8 @@ powershell -ExecutionPolicy Bypass -File scripts\publish.ps1 -SelfContained
 
 产物在 `publish\TaskbarLyrics\`，主程序 `TaskbarLyrics.exe`；
 同目录的 `TaskbarLyrics.dll`、`Microsoft.Windows.SDK.NET.dll` 等必须与 exe 放在一起。
+
+发布出来的 **ZIP 默认不包含字体文件**（`Fonts\*.ttf` 带有独立授权，不由本项目再分发；本地 `publish\TaskbarLyrics\` 目录仍保留字体，方便本机直接运行）。需要含字体的私有压缩包时用 `-IncludeFonts`。
 
 ---
 
@@ -345,16 +349,27 @@ powershell -ExecutionPolicy Bypass -File tools\acceptance.ps1
 
 ## 验证状态
 
-在 Windows 11 (26200) / 2560×1440 @125% / .NET 8 上，`tools\acceptance.ps1` **19/19 全部通过**：
+在 Windows 11 (26200) / 2560×1440 @125% / .NET 8 上实测，`tools\acceptance.ps1` **19/19 全部通过**：
 
 | 项目 | 结果 |
 | --- | --- |
 | 构建产物 | app / cli 均生成 |
-| 引擎单元校验 | 22 passed, 0 failed |
+| 引擎单元校验 | 101 passed, 0 failed（歌词解析、版本匹配、URI 构建、位置外推） |
+| 设置读写校验 | 29 passed, 0 failed |
 | SMTC 实读 | `QQMusic.exe` 曲目/歌手/时长/进度全部可用 |
-| 歌词解析 | 41 行，匹配分 99.8（QQ音乐源） |
-| 叠加窗真机像素 | 位置 `(1622,1381)-(2197,1439)`，145 种颜色，高亮色 `#3ABEFF` 存在 |
-| 设置持久化 | 12 passed, 0 failed |
+| 歌词解析 | 51 行，匹配分 100.0（QQ音乐源） |
+| 叠加窗真机像素 | 位置 `(234,1381)-(809,1439)`，575×58，297 种颜色 |
+| 自适应配色 | 浅色任务栏下自动转为深色字（`AutoAdaptColors`） |
+
+另外几套针对交互的脚本（都在真机上跑，需要应用处于运行状态）：
+
+| 脚本 | 覆盖 | 结果 |
+| --- | --- | --- |
+| `tools\verify-free-drag.ps1` | 锁定态悬停显形/移开收起；解锁态拖出任务栏、边缘吸附、拖回入坞 | 12/12 |
+| `tools\verify-nav-rail-center.ps1` | 设置窗左侧栏收起/展开时折叠按钮的居中与右边距（UI Automation 取矩形） | 6/6 |
+| `tools\verify-hover-shift.ps1` | 悬停时歌词让位、移开后动画回中、两侧墨迹宽度一致（不裁字） | 全 PASS |
+| `tools\verify-cluster-modes.ps1` | 三种控件显形策略下的让位几何（DIP 不变量） | 全 PASS |
+| `tools\verify-p0-look.ps1 -HoverTest` | 静止时左侧区域零墨迹、悬停才显形、透视率与渲染异常计数 | 8/8 |
 
 > 说明：`abs` 值的差异来自 125% 缩放——Win32 报 2560×1440 物理像素，
 > 未声明 DPI 感知的工具会看到 2048×1152 的虚拟化坐标。
@@ -392,8 +407,33 @@ powershell -ExecutionPolicy Bypass -File tools\qq-musicu-lyric.ps1
 - **QRC 逐字时间轴**：QQ音乐的 `format=qrc` 返回加密数据，本项目未做解密，
   因此逐字高亮目前是按行内比例推进的（视觉上已接近逐字，但并非真实音节时间）。
 - **翻译覆盖率**：取决于歌曲本身；中文歌多数无翻译，欧美歌曲覆盖较好。
-- **多显示器**：当前只在**主显示器**任务栏显示。
+- **多显示器**：当前只在**主显示器**任务栏显示；悬浮条拖到别的显示器上会停在主显示器范围内，换显示器只做位置夹取，不做重新落位。
+- **吸附没有引导线**：拖动时按 12 DIP 阈值吸附边缘与居中线，但不会像专业截图工具那样画出对齐参考线（汽水音乐同样没有）。
 - **本地歌词**：暂不支持读取本地 `.lrc` / `.qrc` 文件。
+
+---
+
+## 更新日志
+
+### v1.1.0
+
+**悬浮条：自由拖动、吸附与收起行为**
+
+- 新增**脱离任务栏**：解锁位置后把歌词条拖出任务栏那条带子，松手即成悬浮小条，可放到屏幕任意位置；拖回任务栏上松手重新入坞。
+- 新增**吸附对齐**：拖动时按 12 DIP 阈值吸附显示器左/右/上/下边缘（留 8 DIP 边距）、水平与垂直居中、以及任务栏那一行；可在设置里关掉。
+- 新增设置项 `FreePosition` / `FreeX` / `FreeY` / `SnapToEdges`，设置窗「位置与显示」新增「脱离任务栏（自由位置）」「拖动时吸附对齐」开关与「吸附回任务栏」按钮；位置按 DPI 正确换算后自动保存。
+- 修复：关闭「可拖动」后，鼠标移开时控件不收起的毛病——悬停显形的判断不再依赖锁定状态，锁定（点击穿透）时悬停仍会显形播放按键，移开后正常收起并让歌词缓动回中。
+- 修复：设置窗左侧栏**收起为图标栏后折叠按钮没有居中**（原来按展开态固定 8 DIP 右边距，实际偏右 10 DIP；现在右边距由轨道宽度推导，实测偏差 0.5 px）。
+
+**验证与工具**
+
+- 新增 `tools\verify-free-drag.ps1`（12/12）与 `tools\verify-nav-rail-center.ps1`（6/6，改用 UI Automation 读取控件矩形，不再依赖截图像素启发式）。
+- 文档 `docs\soda-taskbar-lyrics-parity.md` 新增 §12（自由拖动与吸附）与 §13（图标栏折叠按钮居中）。
+- 发布流程调整：`scripts\publish.ps1` 生成的 ZIP 默认剔除字体文件（字体授权不允许再分发），需要时用 `-IncludeFonts`。
+
+### v1.0.0
+
+首个公开版本：任务栏歌词（双行、逐字高亮、翻译行、下一行预览）、多源歌词检索（QQ音乐 / 网易云 / LRCLIB，加权打分择优）、SMTC 播放状态读取与进度外推、悬停显形播放控制与三处信息（歌名/歌手/封面）、自适应任务栏配色、DPI 感知与逐像素透明、Win11 风格设置界面（三页、即时生效）。
 
 ---
 

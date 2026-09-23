@@ -13,6 +13,10 @@
 .PARAMETER NoZip
     Skip creating the ZIP archive.
 
+.PARAMETER IncludeFonts
+    Keep the font files inside the ZIP. Off by default: the fonts have their own
+    licence and are not redistributed with the release.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\publish.ps1
     powershell -ExecutionPolicy Bypass -File scripts\publish.ps1 -SelfContained
@@ -20,7 +24,8 @@
 [CmdletBinding()]
 param(
     [switch]$SelfContained,
-    [switch]$NoZip
+    [switch]$NoZip,
+    [switch]$IncludeFonts
 )
 
 $ErrorActionPreference = 'Stop'
@@ -82,7 +87,25 @@ Write-Host "Main   : TaskbarLyrics.exe"
 if (-not $NoZip) {
     $zip = Join-Path $root 'publish\TaskbarLyrics-win-x64.zip'
     if (Test-Path $zip) { Remove-Item $zip -Force }
-    Compress-Archive -Path (Join-Path $outDir '*') -DestinationPath $zip -CompressionLevel Optimal
+    # Font files carry their own licence and are not redistributed with the release, so
+    # the ZIP leaves them out by default. The local publish folder keeps them so the app
+    # can still be run in place; pass -IncludeFonts for a private archive.
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $skipped = @()
+    $archive = [System.IO.Compression.ZipFile]::Open($zip, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($item in Get-ChildItem $outDir -Recurse -File) {
+            $relative = $item.FullName.Substring($outDir.Length + 1)
+            if (-not $IncludeFonts -and $relative -like 'Fonts\*') { $skipped += $relative; continue }
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $archive, $item.FullName, $relative.Replace('\', '/'),
+                [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+    } finally { $archive.Dispose() }
+    if ($skipped.Count -gt 0) {
+        Write-Host "Fonts  : excluded from the ZIP -> $($skipped -join ', ')  (-IncludeFonts to keep)"
+    }
     $zipMb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
     Write-Host "ZIP    : $zip ($zipMb MB)"
 }
