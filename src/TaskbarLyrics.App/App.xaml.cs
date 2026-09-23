@@ -243,7 +243,12 @@ public partial class App : Application
             // offset would overwrite the drag on the next edit and the strip would
             // jump back to where it started.
             SaveSettings();
-            SettingsWindow.Current?.AdoptPosition(_settings.OffsetX, _settings.OffsetY);
+            SettingsWindow.Current?.AdoptPosition(
+                _settings.OffsetX,
+                _settings.OffsetY,
+                _settings.FreePosition,
+                _settings.FreeX,
+                _settings.FreeY);
         };
 
         // Transport buttons live inside the lyric strip, so playback can be
@@ -919,6 +924,11 @@ public partial class App : Application
         _settings.OffsetX = 0;
         _settings.OffsetY = 0;
         _settings.Width = 460;
+
+        // The tray item is the way back for a strip that was dragged off the taskbar and
+        // then hidden behind something, so it clears the floating position too.
+        _settings.FreePosition = false;
+
         _overlay.UpdateSettings(_settings);
         SaveSettings();
     }

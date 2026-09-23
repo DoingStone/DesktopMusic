@@ -33,6 +33,13 @@ public partial class OverlayWindow : Window
     private const double AboveTaskbarGap = 2;
 
     /// <summary>
+    /// How close (DIP) a dragged edge has to come to a snap line before it sticks to
+    /// it. Small enough to leave free placement alone, large enough to hit the edge
+    /// without slowing the drag down.
+    /// </summary>
+    private const double SnapDistance = 12;
+
+    /// <summary>
     /// How often the Z-order guard may run, in milliseconds.
     /// <para>
     /// Deliberately short. The taskbar is topmost too, and Explorer re-raises it
@@ -76,6 +83,21 @@ public partial class OverlayWindow : Window
     private bool _dragging;
     private Point _dragOrigin;
     private double _dragStartOffsetX;
+
+    /// <summary>Strip's own top-left corner (DIP) when the drag started.</summary>
+    private double _dragStartLeft;
+    private double _dragStartTop;
+
+    /// <summary>True once the pointer has moved far enough to count as a drag, not a click.</summary>
+    private bool _dragMoved;
+
+    /// <summary>Last position written to the drag diagnostic, so it logs movement only.</summary>
+    private int _diagDragX = int.MinValue;
+    private int _diagDragY = int.MinValue;
+
+    /// <summary>True once a free position has been applied, so it is only seeded once.</summary>
+    private bool _freeSeeded;
+
     private bool _positioned;
 
     /// <summary>True when the transport controls stay hidden until the strip is hovered.</summary>
@@ -717,9 +739,19 @@ public partial class OverlayWindow : Window
 
             foreach (var x in new[] { left, right })
             {
-                // Only sample points that are genuinely on the taskbar band.
-                if (x < _taskbar.Bounds.Left + 2 || x > _taskbar.Bounds.Right - 2) continue;
-                if (y < _taskbar.Bounds.Top || y > _taskbar.Bounds.Bottom) continue;
+                // On the taskbar, only points that are genuinely on the bar count — they are
+                // what the strip is drawn over. A floating strip is over whatever happens to
+                // be behind it, so there the monitor is the only limit.
+                if (_settings.FreePosition)
+                {
+                    if (x < _taskbar.MonitorBounds.Left || x > _taskbar.MonitorBounds.Right) continue;
+                    if (y < _taskbar.MonitorBounds.Top || y > _taskbar.MonitorBounds.Bottom) continue;
+                }
+                else
+                {
+                    if (x < _taskbar.Bounds.Left + 2 || x > _taskbar.Bounds.Right - 2) continue;
+                    if (y < _taskbar.Bounds.Top || y > _taskbar.Bounds.Bottom) continue;
+                }
 
                 uint pixel = GetPixel(hdc, x, y);
                 if (pixel == ClrInvalid) continue;
@@ -868,6 +900,23 @@ public partial class OverlayWindow : Window
     {
         ApplyOverlayStyles();
 
+        // Switching "free position" on from the settings window has to seed the floating
+        // coordinates with where the strip is now, otherwise it would jump to the origin.
+        if (_settings.FreePosition)
+        {
+            if (!_freeSeeded && _positioned && _settings.FreeX == 0 && _settings.FreeY == 0)
+            {
+                _settings.FreeX = Left;
+                _settings.FreeY = Top;
+            }
+
+            _freeSeeded = true;
+        }
+        else
+        {
+            _freeSeeded = false;
+        }
+
         Diag.Log($"[overlay] ApplySettingsToVisuals showBg={_settings.ShowBackground} " +
                  $"bg={_settings.BackgroundColor} base={_settings.BaseColor} " +
                  $"hl={_settings.HighlightColor} ctx={_settings.ContextColor} " +
@@ -966,15 +1015,16 @@ public partial class OverlayWindow : Window
     /// </summary>
     private void ApplyControlRevealMode()
     {
-        // Hover needs pointer positions, which only mean something on an interactive
-        // (unlocked) strip: while the overlay is click-through the controls cannot be
-        // clicked, so hiding them would make them unreachable.
+        // Hover goes by the cursor's screen position, not by mouse messages arriving at
+        // this window, so it works while the strip is click-through as well. Gating the
+        // reveal on Interactive used to pin the controls open for good: the strip was
+        // told to show everything and never hid it again, and because the cluster stayed
+        // in place the words never travelled back to the middle either.
         //
         // Track information rides the same reveal: it has no clicks of its own, and while
         // it is pinned open the words have to stay out of its way, which is exactly the
         // layout the user asked not to have.
         _hoverReveal = _settings.HoverRevealControls
-                       && _settings.Interactive
                        && (_settings.ShowTransportControls || HasTrackInfo);
 
         // The drag pill is the strip's own affordance rather than part of the transport
@@ -1341,6 +1391,14 @@ public partial class OverlayWindow : Window
 
         var width = Math.Max(MinOverlayWidth, _settings.Width);
 
+        // A strip that has been dragged off the bar floats at its own screen position: the
+        // band arithmetic below would pull it straight back onto the taskbar.
+        if (_settings.FreePosition)
+        {
+            PlaceFree(width);
+            return;
+        }
+
         // The right edge of the overlay sits at the left edge of the tray plus
         // the user's horizontal offset.
         var trayLeftDevice = TaskbarLocator.GetTrayLeftDevicePixels();
@@ -1424,6 +1482,58 @@ public partial class OverlayWindow : Window
         {
             NativeMethods.SetTopmost(this);
         }
+    }
+
+    /// <summary>
+    /// Position the floating strip. Only the monitor constrains it — the taskbar band has no
+    /// say any more, which is the whole point of a free position.
+    /// </summary>
+    private void PlaceFree(double width)
+    {
+        if (_taskbar is null) return;
+
+        var scale = _taskbar.Scale > 0 ? _taskbar.Scale : 1.0;
+        var monitorLeft = _taskbar.MonitorBounds.Left / scale;
+        var monitorTop = _taskbar.MonitorBounds.Top / scale;
+        var monitorRight = _taskbar.MonitorRightDip;
+        var monitorBottom = _taskbar.MonitorBounds.Bottom / scale;
+
+        // Off the taskbar the strip is no longer chained to a 46 DIP band, so a user-set
+        // height is honoured up to the screen itself.
+        var usable = Math.Max(16, (monitorBottom - monitorTop) - (2 * EdgePadding));
+        var fitted = _settings.Height > 0 ? _settings.Height : Math.Max(16, _taskbar.HeightDip - 2);
+        Height = Math.Clamp(fitted, 16, usable);
+
+        Width = width;
+
+        // Stay fully on the monitor: a strip parked off-screen could not be grabbed again,
+        // and the settings sliders only move a docked strip.
+        var left = Math.Clamp(_settings.FreeX,
+            monitorLeft + EdgePadding,
+            Math.Max(monitorLeft + EdgePadding, monitorRight - width - EdgePadding));
+
+        var top = Math.Clamp(_settings.FreeY,
+            monitorTop + EdgePadding,
+            Math.Max(monitorTop + EdgePadding, monitorBottom - Height - EdgePadding));
+
+        // Persist what was actually applied, so a clamped position is the saved one.
+        _settings.FreeX = left;
+        _settings.FreeY = top;
+
+        Left = left;
+        Top = top;
+        _positioned = true;
+
+        if (_compositing == CompositingMode.ColorKey)
+        {
+            UpdateLayout();
+            TransparencyMode.ApplyColorKey(this, _settings.BackgroundCornerRadius);
+        }
+
+        // A floating strip is a widget in its own right, so it belongs at the top of the
+        // topmost band; inserting it just above the taskbar would leave every ordinary
+        // window free to cover it.
+        NativeMethods.SetTopmost(this);
     }
 
     /// <summary>
@@ -1645,8 +1755,11 @@ public partial class OverlayWindow : Window
         }
 
         _dragging = true;
+        _dragMoved = false;
         _dragOrigin = PointToScreen(e.GetPosition(this));
         _dragStartOffsetX = _settings.OffsetX;
+        _dragStartLeft = Left;
+        _dragStartTop = Top;
         SetDragHandleDragging(true);
 
         // Pause the reposition timer during drag so it does not fight the live
@@ -1663,13 +1776,51 @@ public partial class OverlayWindow : Window
 
         var current = PointToScreen(e.GetPosition(this));
         var scale = _taskbar?.Scale ?? 1.0;
+        if (scale <= 0) scale = 1.0;
 
-        // Horizontal only. The strip is anchored inside the taskbar band, so letting
-        // the pointer drag it vertically would push lyrics off the taskbar; vertical
-        // placement stays under "垂直对齐"/"垂直偏移" in settings instead.
         var dxDip = (current.X - _dragOrigin.X) / scale;
+        var dyDip = (current.Y - _dragOrigin.Y) / scale;
 
-        _settings.OffsetX = _dragStartOffsetX + dxDip;
+        // A couple of pixels of slop keep a plain click from being read as a nudge.
+        if (!_dragMoved && (Math.Abs(dxDip) + Math.Abs(dyDip)) < 3) return;
+        _dragMoved = true;
+
+        var width = Math.Max(MinOverlayWidth, _settings.Width);
+        var height = ActualHeight > 0 ? ActualHeight : Math.Max(16, _taskbar?.HeightDip ?? 40);
+
+        // While the strip is still on the bar the drag stays horizontal, so an unsteady
+        // hand cannot knock the lyrics out of the taskbar by a few pixels. Pulling the
+        // strip clear of the band hands it over to free placement, where it follows the
+        // pointer in both axes.
+        if (!_settings.FreePosition && !OverlapsBand(_dragStartTop + dyDip, height))
+        {
+            EnterFreePosition(_dragStartLeft + dxDip, _dragStartTop + dyDip);
+        }
+
+        if (_settings.FreePosition)
+        {
+            var left = _dragStartLeft + dxDip;
+            var top = _dragStartTop + dyDip;
+
+            if (_settings.SnapToEdges) Snap(ref left, ref top, width, height);
+
+            _settings.FreeX = left;
+            _settings.FreeY = top;
+
+            // One line per real move, not per mouse event: the log flushes to disk.
+            var rx = (int)Math.Round(left);
+            var ry = (int)Math.Round(top);
+            if (rx != _diagDragX || ry != _diagDragY)
+            {
+                _diagDragX = rx;
+                _diagDragY = ry;
+                Diag.Log($"[overlay] drag free x={rx} y={ry} w={width:F0} h={height:F0}");
+            }
+        }
+        else
+        {
+            _settings.OffsetX = _dragStartOffsetX + dxDip;
+        }
 
         PlaceOverWindow();
     }
@@ -1679,15 +1830,158 @@ public partial class OverlayWindow : Window
         if (!_dragging) return;
 
         _dragging = false;
+        _dragMoved = false;
         SetDragHandleDragging(false);
         ReleaseMouseCapture();
 
         // Resume the reposition timer now that the drag is finished.
         _repositionTimer.Start();
 
+        // Dropping the strip back onto the bar docks it again, so a drag that only meant
+        // to nudge it sideways cannot leave it floating by accident.
+        if (_settings.FreePosition && OverlapsBand(Top, ActualHeight))
+        {
+            DockToTaskbar();
+        }
+
         PlaceOverWindow();
         PositionChanged?.Invoke(this, EventArgs.Empty);
         OverlayClicked?.Invoke(this, EventArgs.Empty);
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// True when a strip whose top sits at <paramref name="top"/> belongs to the taskbar
+    /// band: either it overlaps the band, or it rests just above it, which is where
+    /// "float above the taskbar" puts it.
+    /// </summary>
+    private bool OverlapsBand(double top, double height)
+    {
+        if (_taskbar is null) return true;
+
+        var bandTop = _taskbar.TopDip;
+        var bandBottom = bandTop + _taskbar.HeightDip;
+
+        var centre = top + (height / 2.0);
+        if (centre >= bandTop && centre <= bandBottom) return true;
+
+        var gap = bandTop - (top + height);
+        return gap >= -2 && gap <= 24;
+    }
+
+    /// <summary>
+    /// Hand the strip over to free placement, seeded with the position it is visibly at so
+    /// that switching modes cannot make it jump.
+    /// </summary>
+    private void EnterFreePosition(double left, double top)
+    {
+        _settings.FreePosition = true;
+        _settings.FreeX = left;
+        _settings.FreeY = top;
+
+        Diag.Log($"[overlay] drag left the taskbar: free position x={left:F1} y={top:F1}");
+    }
+
+    /// <summary>
+    /// Return to the taskbar-anchored placement while keeping the strip where it visually
+    /// is: the horizontal offset is derived from the strip's own right edge, so docking
+    /// does not move it.
+    /// </summary>
+    private void DockToTaskbar()
+    {
+        var anchorRight = AnchoredRightDip();
+        if (!double.IsNaN(anchorRight))
+        {
+            _settings.OffsetX = (Left + ActualWidth) - anchorRight;
+        }
+
+        _settings.FreePosition = false;
+
+        Diag.Log($"[overlay] docked back to the taskbar: offsetX={_settings.OffsetX:F1}");
+    }
+
+    /// <summary>Tray left edge in DIP — the anchor a docked strip hangs from.</summary>
+    private double AnchoredRightDip()
+    {
+        if (_taskbar is null) return double.NaN;
+
+        var scale = _taskbar.Scale > 0 ? _taskbar.Scale : 1.0;
+        var device = TaskbarLocator.GetTrayLeftDevicePixels();
+        if (double.IsNaN(device)) device = _taskbar.Bounds.Right;
+
+        return device / scale;
+    }
+
+    /// <summary>
+    /// Pull a dragged strip onto the nearest alignment line: the monitor edges and centre,
+    /// the tray column it docks at, and the taskbar's own rows. Either edge of the strip
+    /// may catch a line, whichever is closer.
+    /// </summary>
+    private void Snap(ref double left, ref double top, double width, double height)
+    {
+        if (_taskbar is null) return;
+
+        var scale = _taskbar.Scale > 0 ? _taskbar.Scale : 1.0;
+        var monitorLeft = _taskbar.MonitorBounds.Left / scale;
+        var monitorTop = _taskbar.MonitorBounds.Top / scale;
+        var monitorRight = _taskbar.MonitorRightDip;
+        var monitorBottom = _taskbar.MonitorBounds.Bottom / scale;
+
+        var bandTop = _taskbar.TopDip;
+
+        var xLines = new[]
+        {
+            monitorLeft + EdgePadding,
+            monitorRight - width - EdgePadding,
+            (monitorLeft + monitorRight - width) / 2.0,
+            double.NaN,
+        };
+
+        var anchoredRight = AnchoredRightDip();
+        if (!double.IsNaN(anchoredRight))
+        {
+            // The column the strip occupies while docked, so dragging it back to roughly
+            // where it came from clicks into place.
+            xLines[3] = anchoredRight + _settings.OffsetX - width;
+        }
+
+        var yLines = new[]
+        {
+            monitorTop + EdgePadding,
+            monitorBottom - height - EdgePadding,
+            (monitorTop + monitorBottom - height) / 2.0,
+            bandTop + ((_taskbar.HeightDip - height) / 2.0),
+            bandTop - height - AboveTaskbarGap,
+        };
+
+        left = SnapAxis(left, width, xLines);
+        top = SnapAxis(top, height, yLines);
+    }
+
+    private static double SnapAxis(double start, double size, double[] lines)
+    {
+        var best = start;
+        var bestDistance = SnapDistance;
+
+        foreach (var line in lines)
+        {
+            if (double.IsNaN(line)) continue;
+
+            var distance = Math.Abs(start - line);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = line;
+            }
+
+            distance = Math.Abs((start + size) - line);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = line - size;
+            }
+        }
+
+        return best;
     }
 }

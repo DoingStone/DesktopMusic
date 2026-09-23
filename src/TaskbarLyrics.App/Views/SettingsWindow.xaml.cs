@@ -484,9 +484,14 @@ public partial class SettingsWindow : Window
             }
         }
 
-        // The toggle lives in the pane header now, so it needs no repositioning here: the
-        // pane lays it out at its right edge at any width. Only the identity goes, since it
-        // cannot fit in the rail.
+        // The toggle is pinned to the pane's right edge, which is correct while the pane is
+        // wide: the identity sits at the left edge and the toggle balances it on the right.
+        // In the rail the identity is gone and the toggle is the only thing left in the
+        // header, so that 8 DIP right margin leaves it visibly right of the rail's centre.
+        // Centre it instead, computed from the rail width so the two cannot drift apart.
+        var toggleWidth = double.IsNaN(NavToggleButton.Width) ? NavToggleButton.ActualWidth : NavToggleButton.Width;
+        NavToggleButton.Margin = new Thickness(0, 0, collapsed ? Math.Max(0, (RailWidth - toggleWidth) / 2) : 8, 0);
+
         TitleIdentity.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         UpdateNavLimits();
 
@@ -725,6 +730,8 @@ public partial class SettingsWindow : Window
 
             InteractiveCheck.IsChecked = _working.Interactive;
             PlaceAboveCheck.IsChecked = _working.PlaceAboveTaskbar;
+            FreePositionCheck.IsChecked = _working.FreePosition;
+            SnapEdgesCheck.IsChecked = _working.SnapToEdges;
             TransportControlsCheck.IsChecked = _working.ShowTransportControls;
             HoverRevealControlsCheck.IsChecked = _working.HoverRevealControls;
             SongProgressCheck.IsChecked = _working.ShowSongProgress;
@@ -786,6 +793,8 @@ public partial class SettingsWindow : Window
 
         _working.Interactive = InteractiveCheck.IsChecked == true;
         _working.PlaceAboveTaskbar = PlaceAboveCheck.IsChecked == true;
+        _working.FreePosition = FreePositionCheck.IsChecked == true;
+        _working.SnapToEdges = SnapEdgesCheck.IsChecked == true;
         _working.ShowTransportControls = TransportControlsCheck.IsChecked == true;
         _working.HoverRevealControls = HoverRevealControlsCheck.IsChecked == true;
         _working.ShowSongProgress = SongProgressCheck.IsChecked == true;
@@ -896,16 +905,23 @@ public partial class SettingsWindow : Window
     /// authoritative.
     /// </para>
     /// </summary>
-    public void AdoptPosition(double offsetX, double offsetY)
+    public void AdoptPosition(double offsetX, double offsetY, bool freePosition, double freeX, double freeY)
     {
         _working.OffsetX = offsetX;
         _working.OffsetY = offsetY;
+        _working.FreePosition = freePosition;
+        _working.FreeX = freeX;
+        _working.FreeY = freeY;
 
         _loading = true;
         try
         {
             OffsetXSlider.Value = Clamp(offsetX, OffsetXSlider.Minimum, OffsetXSlider.Maximum);
             OffsetYSlider.Value = Clamp(offsetY, OffsetYSlider.Minimum, OffsetYSlider.Maximum);
+
+            // A drag can dock or undock the strip, so the switch has to follow the gesture
+            // rather than keep showing what it was set to before.
+            FreePositionCheck.IsChecked = freePosition;
         }
         finally
         {
@@ -913,7 +929,9 @@ public partial class SettingsWindow : Window
         }
 
         UpdateValueLabels();
-        SetStatus($"已记录拖动位置（X={offsetX:0}）");
+        SetStatus(freePosition
+            ? $"已记录悬浮位置（X={freeX:0} Y={freeY:0}）"
+            : $"已记录拖动位置（X={offsetX:0}）");
     }
 
     private void UpdateValueLabels()
@@ -1006,6 +1024,17 @@ public partial class SettingsWindow : Window
 
     private void Nudge(double dx, double dy)
     {
+        // A floating strip ignores the anchor-relative offsets, so the nudge buttons have to
+        // move the free coordinates instead — otherwise they would look broken.
+        if (_working.FreePosition)
+        {
+            _working.FreeX += dx;
+            _working.FreeY += dy;
+            _applyLive(_working);
+            SetStatus($"悬浮位置：X={_working.FreeX:0} Y={_working.FreeY:0}");
+            return;
+        }
+
         _working.OffsetX += dx;
         _working.OffsetY += dy;
         _applyLive(_working);
@@ -1025,6 +1054,9 @@ public partial class SettingsWindow : Window
         _working.Height = 0;
         _working.VerticalAlign = 0;
 
+        // "Default position" is the docked one, so a floating strip comes back to the bar.
+        _working.FreePosition = false;
+
         // Push through the sliders so the UI stays in sync with the model.
         _loading = true;
         try
@@ -1034,6 +1066,7 @@ public partial class SettingsWindow : Window
             WidthSlider.Value = 460;
             HeightSlider.Value = 0;
             VerticalAlignSlider.Value = 0;
+            FreePositionCheck.IsChecked = false;
         }
         finally
         {
@@ -1043,6 +1076,35 @@ public partial class SettingsWindow : Window
         UpdateValueLabels();
         _applyLive(_working);
         SetStatus("已恢复默认位置、宽度与高度");
+    }
+
+    /// <summary>
+    /// Bring a floating strip back onto the taskbar: free placement is switched off and the
+    /// anchor-relative offsets are cleared, which is the docked default.
+    /// </summary>
+    private void OnDockToTaskbar(object sender, RoutedEventArgs e)
+    {
+        _working.FreePosition = false;
+        _working.OffsetX = 0;
+        _working.OffsetY = 0;
+        _working.VerticalAlign = 0;
+
+        _loading = true;
+        try
+        {
+            OffsetXSlider.Value = 0;
+            OffsetYSlider.Value = 0;
+            VerticalAlignSlider.Value = 0;
+            FreePositionCheck.IsChecked = false;
+        }
+        finally
+        {
+            _loading = false;
+        }
+
+        UpdateValueLabels();
+        _applyLive(_working);
+        SetStatus("已吸附回任务栏");
     }
 
     // ---- footer actions ------------------------------------------------

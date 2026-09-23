@@ -122,6 +122,34 @@ public sealed class AppSettings
     /// </summary>
     public bool PlaceAboveTaskbar { get; set; }
 
+    /// <summary>
+    /// True once the strip has been dragged out of the taskbar band: it then floats
+    /// at <see cref="FreeX"/>/<see cref="FreeY"/> anywhere on the monitor instead of
+    /// hugging the tray.
+    /// <para>
+    /// Set by dragging the strip away from the bar and cleared by dragging it back,
+    /// by the tray's "reset position" item, or by the settings window. Persisted, so
+    /// a strip left floating comes back floating.
+    /// </para>
+    /// </summary>
+    public bool FreePosition { get; set; }
+
+    /// <summary>
+    /// Top-left corner of the floating strip in DIP screen coordinates. Only read
+    /// while <see cref="FreePosition"/> is true: the docked position keeps using
+    /// <see cref="OffsetX"/>/<see cref="OffsetY"/> so re-docking stays exact.
+    /// </summary>
+    public double FreeX { get; set; }
+
+    /// <inheritdoc cref="FreeX"/>
+    public double FreeY { get; set; }
+
+    /// <summary>
+    /// Snap the strip to the screen edges, the monitor centre lines and the taskbar
+    /// band while dragging, so lining it up takes no precision.
+    /// </summary>
+    public bool SnapToEdges { get; set; } = true;
+
     // ---- playback hotkeys ----------------------------------------------
     // Empty text disables that shortcut. Format: "Ctrl+Alt+Space", "Ctrl+Alt+Right".
     // Registered system-wide so playback can be driven while the overlay stays
@@ -180,9 +208,11 @@ public sealed class AppSettings
     /// <para>
     /// The reference implementation's docked widget is lyrics plus cover art and
     /// nothing else; its buttons overlay the strip only while the pointer is inside
-    /// it. Only meaningful while the strip is interactive — a click-through overlay
-    /// receives no mouse messages, so its controls must stay visible to be usable at
-    /// all. Ignored when the hover cluster would be empty anyway — that is, when
+    /// it. The hover test reads the global cursor position rather than the window's
+    /// mouse messages, so it keeps working while the strip is click-through — the
+    /// controls can therefore hide again when the pointer leaves, whether or not
+    /// <see cref="Interactive"/> is on. Ignored when the hover cluster would be
+    /// empty anyway — that is, when
     /// <see cref="ShowTransportControls"/>, <see cref="ShowCoverArt"/>,
     /// <see cref="ShowSongTitle"/> and <see cref="ShowSongArtist"/> are all off.
     /// </para>

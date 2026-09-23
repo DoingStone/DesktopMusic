@@ -910,6 +910,15 @@
                                         <CheckBox x:Name="InteractiveCheck"
                                                   Content="歌词可拖动 / 可点击（关闭则整条点击穿透）"
                                                   Click="OnOptionChanged" />
+                                        <!-- Free position is what a vertical drag produces, so the
+                                             switch and the gesture stay in step: turning it on keeps
+                                             the strip where it is and lets it follow the pointer. -->
+                                        <CheckBox x:Name="FreePositionCheck"
+                                                  Content="脱离任务栏（自由位置，可拖到屏幕任意处）"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="SnapEdgesCheck"
+                                                  Content="拖动时吸附对齐（屏幕边缘、居中与任务栏行）"
+                                                  Click="OnOptionChanged" />
                                         <CheckBox x:Name="PlaceAboveCheck"
                                                   Content="浮在任务栏上方（彻底消除闪烁，代价是不在任务栏内）"
                                                   Click="OnOptionChanged" />
@@ -1207,7 +1216,7 @@
 
                                 <GroupBox Header="微调位置">
                                     <StackPanel>
-                                        <TextBlock Text="歌词条可直接用鼠标拖动（需在「常规」中开启「歌词可拖动」）；也可用下面的按钮精确微调。"
+                                        <TextBlock Text="歌词条可直接用鼠标拖动（需在「常规」中开启「歌词可拖动」）：左右拖动贴着任务栏移动，向下拖出任务栏即变成自由位置的悬浮条，可放在屏幕任意处，松手时自动吸附。"
                                                    Foreground="{DynamicResource FgMuted}" FontSize="11"
                                                    Margin="0,0,0,10" TextWrapping="Wrap" />
                                         <UniformGrid Columns="4">
@@ -1218,6 +1227,8 @@
                                         </UniformGrid>
                                         <Button Content="恢复默认位置与宽度" Click="OnResetPosition"
                                                 Margin="0,10,0,0" HorizontalAlignment="Left" />
+                                        <Button Content="吸附回任务栏" Click="OnDockToTaskbar"
+                                                Margin="0,6,0,0" HorizontalAlignment="Left" />
                                     </StackPanel>
                                 </GroupBox>
                             </StackPanel>
@@ -1323,7 +1334,7 @@
                                 </GroupBox>
 
                                 <GroupBox Header="拖动说明">
-                                    <TextBlock Text="在「常规」中开启「歌词可拖动」后，即可直接用鼠标拖动任务栏上的歌词框来调整位置；位置会自动保存。关闭后恢复点击穿透，不会挡住任务栏操作。"
+                                    <TextBlock Text="在「常规」中开启「歌词可拖动」后，即可直接用鼠标拖动歌词框：左右拖动贴着任务栏滑动，拖出任务栏就变成可放在屏幕任意处的悬浮条，拖回任务栏会自动重新贴合。松手时吸附到屏幕边缘、居中线与任务栏行。位置会自动保存；关闭「歌词可拖动」后恢复点击穿透，不会挡住任务栏操作（此时鼠标移开仍会隐藏按钮并把歌词移回正中）。"
                                                Foreground="{DynamicResource FgMuted}" FontSize="11" TextWrapping="Wrap" />
                                 </GroupBox>
                             </StackPanel>

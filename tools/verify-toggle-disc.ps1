@@ -108,7 +108,9 @@ if ($rect.Left -le -20000 -or $rect.Top -le -20000 -or $rect.Right -le $rect.Lef
 # is refused when the caller is not the foreground process, so raise it with SetWindowPos
 # (HWND_TOPMOST) for the shots and drop it back at the end.
 [void][ToggleProbe]::SetWindowPos($hwnd, [IntPtr](-1), 0, 0, 0, 0, 0x0043)   # HWND_TOPMOST | NOMOVE|NOSIZE|SHOWWINDOW
-Start-Sleep -Milliseconds 400
+# The window also has to settle: while it is still being laid out (and its Mica backdrop is
+# still being composed) the rect and the pixels disagree, and every luma reading is garbage.
+Start-Sleep -Milliseconds 1500
 [void][ToggleProbe]::GetWindowRect($hwnd, [ref]$rect)
 $winW = $rect.Right - $rect.Left
 $winH = $rect.Bottom - $rect.Top

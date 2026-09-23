@@ -600,3 +600,41 @@ offset=274.5 target=278.1 sung=363.6             progress=0.981
   `git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 push origin main`
 - 结果：`origin/main = c4fb32bdb03430b478715c9002bdf26bb7bfc2dd`；上传树 **112 个文件**，`.ttf/.otf/.woff2/.node/.asar/.dll/.exe` **零命中**；`Configuration\BundledFonts.cs`、`Controls\TransportButton.cs`、`Fonts\README.md`、`tools\verify-toggle-disc.ps1`、`tools\verify-hover-shift.ps1`、`tools\verify-cluster-modes.ps1` 均在树内。
 - 变基后复核：`SettingsWindow.xaml` :311 `PaneToggleButton` 样式、:713 引用、:935/:938/:941 三个信息开关都在；构建 0 警告 0 错误。
+
+## 12. 「可拖动」开关的两个缺陷 + 自由拖动 / 脱离任务栏 / 吸附
+
+- **需求（用户原话要点）**：当前问题 1「点击关闭『可拖动』后，鼠标移开时歌词不移动、按钮也不消失」；问题 2「无法随意拖动歌词栏的位置，包括无法将其脱离任务栏」。期望功能 1「歌词栏可随意脱离任务栏，自由拖拽到任意位置」；期望功能 2「支持吸附（对齐）功能」。
+- **问题 1 根因**：`OverlayWindow.xaml.cs` 的 `ApplyControlRevealMode()` 把悬停显隐和「可拖动」绑在了一起（`_hoverReveal = HoverRevealControls && _settings.Interactive && …`）。`AppSettings.Interactive` 就是 `!Locked`（`AppSettings.cs:154-169`），设置窗「歌词可拖动 / 可点击」写的正是它 ⇒ 关掉以后 `_hoverReveal=false`，代码走「常显」分支（把 `TransportPanel`/`InfoPanel`/`DragHandle` 的 Opacity 全重置为 1），而且 `_pointerTimer.Stop()` 让指针轮询彻底停下 ⇒ 鼠标移开既不隐藏也不归位，与用户描述逐字对应。
+- **被推翻的旧前提**：改动前的注释与 `AppSettings.cs` 的 XML 文档都写着「点击穿透时窗口收不到鼠标消息，所以控件只能常显」。实际悬停判定根本不依赖窗口消息 —— `PollPointer()`（:1061）调 `IsCursorOverStrip()`（:1073），后者用 `NativeMethods.GetCursorPos` 取全局光标坐标，再与 `Left/Top/ActualWidth/ActualHeight × _taskbar.Scale`（±4 px slack）比较 ⇒ **点击穿透时同样有效**。修法就是删掉那一个 `&& _settings.Interactive` 项并更正注释；`DragHandle.Visibility` 仍只跟随 `Interactive`（不能拖的时候不该亮出拖动把手）。
+- **问题 2 根因**：拖动只在 `_settings.Interactive` 时才开始，`OnMouseMove` 只算水平位移，而 `PlaceOverWindow()` 每次都把窗口夹回任务栏带内 ⇒ 结构和垂直方向都不可能离开任务栏。
+- **新增设置**（`AppSettings.cs`，紧跟 `PlaceAboveTaskbar` 之后）：`FreePosition`（bool，默认 false）、`FreeX`/`FreeY`（double DIP，仅 `FreePosition` 为真时生效）、`SnapToEdges`（bool，默认 true）。入坞状态仍用原来的 `OffsetX/OffsetY`，两套位置互不干扰 ⇒ 关掉自由位置就回到原来的任务栏位置。
+- **自由落位**：`PlaceOverWindow()` 算出宽度后分叉 `if (_settings.FreePosition) { PlaceFree(width); return; }`。`PlaceFree` 用监听器边界（`_taskbar.MonitorBounds` × `Scale`）而不是任务栏带：高度取 `Height>0 ? Height : max(16, bandHeight−2)`，再把 `FreeX/FreeY` 夹进 `[monitorLeft+8, monitorRight−width−8] × [monitorTop+8, monitorBottom−height−8]` 并**回写**设置 ⇒ 条带永远不会被拖出屏幕丢不掉；Z 序用 `SetTopmost`（不能用 `SetAbove(taskbar)`，否则普通窗口会盖住它）。
+- **拖动语义**：`OnMouseMove` 同时算 dx/dy（都是 DIP，除以 `scale`），3 DIP 抖动阈值；只要条带中心离开任务栏带（`OverlapsBand` = 中心在带内，或位于带上方 0–24 DIP 的「贴着任务栏」区间）就切到自由位置（`EnterFreePosition`），此后写 `FreeX/FreeY`；松手时若中心又回到带内，`DockToTaskbar()` 把 `OffsetX` 反算成 `Left + ActualWidth − anchorRight`（`anchorRight` 优先取托盘左缘 `TaskbarLocator.GetTrayLeftDevicePixels()`，NaN 时退回任务栏右缘）⇒ 自由位置与入坞可以来回切换而不丢原来的水平位置。
+- **吸附**：`Snap(ref left, ref top, width, height)` 两个轴各求一组候选线、**两边都能吸**（左边也试、右边也试），取 `SnapDistance = 12` DIP 内最近的一条。X 候选：监听器左缘+8、右缘−宽−8、水平居中、入坞列（`anchoredRight + OffsetX − width`）；Y 候选：监听器上缘+8、下缘−高−8、垂直居中、任务栏带内居中、带上方（`bandTop − height − AboveTaskbarGap`）。吸附在拖动过程中实时生效 ⇒ 松手前就能看到对齐。
+- **自适应配色**：`SampleBackdropLuminance()` 原来只在任务栏带内取样（不在带内的点直接 `continue`），条带一浮起来就取不到背景 ⇒ 自由位置时改为按监听器边界判定，浮在桌面或窗口上也照样能自动黑白配色。
+- **设置窗**：「常规 → 交互」新增「脱离任务栏（自由位置，可拖到屏幕任意处）」（`FreePositionCheck`）与「拖动时吸附对齐（屏幕边缘、居中与任务栏行）」（`SnapEdgesCheck`）；「尺寸与位置 → 微调位置」新增「吸附回任务栏」按钮（`OnDockToTaskbar`），四个方向微调按钮在自由位置时改的是 `FreeX/FreeY`（否则它们看起来像坏的）；「恢复默认位置与宽度」与托盘「恢复默认位置」也一并清掉自由位置状态，避免条带被拖到角落后再也回不来。拖动说明文案同步更新（关闭可拖动后仍会隐藏按钮并把歌词移回正中）。
+- **实测**（`tools\verify-free-drag.ps1`，2560×1440 @125%，条带 575×58 px = 460×46.4 DIP，任务栏带 1380..1440 px）：
+  - 用例 1（`Locked=true`，点击穿透）：悬停 `controls revealed` + `inset=116.4 DIP`（让位生效）；移开后 `controls hidden`（日志偏移 3541 → 4290）且 `inset` 回到 `0.0 DIP` ⇒ 问题 1 修复。
+  - 用例 2（`Locked=false`）：起始 `top=1381 bottom=1439`（带内）→ 拖向右上角：`drag left the taskbar: free position` + 14 条跟随采样 → `top=10 bottom=68`（已离开带）→ **上边缘吸附到 10 px = 8 DIP**、**右边缘吸附到 2550 px = 屏宽−8 DIP**（拖放目标故意偏 7 DIP，落点仍在吸附线上 ⇒ 是真吸附而不是「刚好放对」）→ 拖回带上松手：`docked back to the taskbar`，矩形回到 `top=1381 bottom=1439` ⇒ 期望 1、2 达成。
+- **回归（全部通过）**：`tools\acceptance.ps1` 19/19（引擎 self-test 101、设置 self-test 29 —— 新增设置项没破坏它、overlay 575×58、自适应配色可读）；`tools\verify-cluster-modes.ps1` 三例全 PASS（钉住常显时 `inset` 仍等于 `cluster + 6`、信息开关全关时 `cluster=110.4`、设置窗 0 条 fault）；`tools\verify-p0-look.ps1 -HoverTest` 8/8（静止左带 0 px、悬停左带 519 px、透视 96.4%）；`tools\verify-hover-shift.ps1` 全 PASS（静止墨迹质心 277.0 vs 条中心 287.5、悬停让位后墨迹 364..541 px 落在 `inset 266.8 DIP` 之后、**悬停与静止墨迹宽度同为 177 px** ⇒ 没有裁字、回程 16 个不同距离 ⇒ 是动画不是瞬移）。
+- **踩坑**：
+  1. `GetDeviceCaps` 在 **gdi32.dll**，不是 user32（`GetDC`/`ReleaseDC` 才在 user32）；写错只会在运行期炸 `EntryPointNotFoundException: 无法在 DLL“user32.dll”中找到名为“GetDeviceCaps”的入口点`，`Add-Type` 编译期不报。
+  2. 断言要找对标记：`[overlay] controls hover-revealed (shown=…)` 是**应用设置时**写的模式行（启动时就是 `shown=False`，会让「离开后隐藏」的断言假通过），真正的悬停迁移标记是 `[overlay] controls revealed` / `controls hidden`（写在 `SetControlsShown` 里）。
+  3. 日志里 `lyric inset=` 有很多条，必须取**最后一条**（`-match '(?s).*inset=([\d.]+)'` 的贪婪匹配）；取第一条会拿到启动时的 `inset=0.0`，报出「悬停没让位」的假 FAIL。
+  4. `SetCursorPos` 不保证给被捕获的窗口投递 `WM_MOUSEMOVE`：每次移动后再补一对 `mouse_event(MOUSEEVENTF_MOVE, 1, 0)` 与 `(−1, 0)`（净位移为零），拖动才会被 `OnMouseMove` 看到。
+  5. 往**下**拖到屏幕底部测吸附会失败：任务栏就在底部，条带中心仍在带内 ⇒ 松手会被判为「放回任务栏」而重新入坞。要测自由位置与吸附必须往**上**拖。
+- **未做**：跨显示器拖动（`MonitorFromWindow` 换屏后重新落位）与拖动时的抓取点偏移修正未做；吸附没有视觉引导线（汽水音乐也没有，故不认为需要）。
+
+## 13. 「收起后没有居中」：设置窗图标栏里的折叠按钮右偏 10 DIP
+
+- **需求（用户原话要点）**：「悬浮栏/歌词栏收起（折叠）后没有居中」，要求 1) 定位「收起」后未居中的原因 2) 修复后收起状态保持居中；附图 129×60 px（sha256 `cde6a2104ebf1ddd09b8e83001d3177a672a184ae3d7ccc0dd30da91da78f662`）。
+- **先排除悬浮条**：隔离启动（`TBL_SETTINGS` 指向用户配置副本，仅改 `OffsetX=0`）并把光标移开，抓 `GetWindowRect` 矩形 `1662,1381 575x58`；墨迹 663 px、bbox `x 481..564`（全在右端）、左侧 200 列零墨。日志 `[overlay] Render … left=1330 top=1105`（日志是 DIP，×1.25 = 抓拍坐标，二者一致）。这是**长行跑马灯滚到末尾**：`scrolling` 为真时 `LeftFor = ContentInset − _scrollOffset`，文本右端钉在内容框右缘（452 DIP），本来就不居中 ⇒ 与本缺陷无关。
+- **真因**：本程序里「收起」只有一处 —— 设置窗左侧栏折叠成 64 DIP 图标栏（`AppSettings.NavCollapsed`，状态文案在 `SettingsWindow.xaml.cs:496`）。`NavToggleButton` 原本是 `HorizontalAlignment="Right"` + `Margin="0,0,8,0"`：展开时它与左边的 `TitleIdentity` 一左一右是刻意的配平；折叠后 `TitleIdentity` 被隐藏（`ApplyNavCollapsed` 里 `TitleIdentity.Visibility = Collapsed`），按钮成了 32 DIP 头部里唯一的内容，28 DIP 的按钮落在 36..64 DIP ⇒ 中心 42 DIP，而轨道中心只有 32 DIP ⇒ **右偏 10 DIP**。像素取证与推导一致（图标中心 52.5 px vs 轨道中心 40 px；轨道自身 1 DIP 右边框落在 x=78.75..80 px）。
+- **修法**（`SettingsWindow.xaml.cs` 的 `ApplyNavCollapsed`）：右边距由 `RailWidth` 推出 —— `collapsed ? Math.Max(0, (RailWidth - toggleWidth) / 2) : 8`（`toggleWidth` 取 `Width`，为 NaN 时退回 `ActualWidth`）⇒ 收起时 18 DIP、展开时仍是 8 DIP，两个状态由同一个常量推导，不会再漂移；原注释「toggle 在头部任何宽度都自己靠右」一并改掉。
+- **验证**：新增 `tools\verify-nav-rail-center.ps1`。几何取自 **UI Automation**（`AutomationId=NavToggleButton` 的 `BoundingRectangle`，物理像素、精确、不受窗口遮挡影响），两例各用 `TBL_SETTINGS` 隔离启动（`NavCollapsed=true` / `NavCollapsed=false, NavWidth=232`）。**6/6 PASS**：
+  - 收起：窗口 left 718 px，按钮 `740.0..775.0` px ⇒ 中心 757.5 vs 轨道中心 758.0 = **0.5 px 偏差**（修前中心 770.5 ⇒ 12.5 px 偏差）；按钮 35.0×35.0 px = 28 DIP；19 DIP 图标占 `745.6..769.4`，两侧都留白。
+  - 展开：按钮右缘 998.0 px = 窗格右缘 1008 − 8 DIP(10 px) **精确相等**，中心 980.5 = 期望 980.5；与收起态中心相距 223 px ⇒ 轨道的居中偏移没有带进展开态。
+- **踩坑**：
+  1. 截图像素法先试过：收起态的底色众数会被窗口左上圆角（露出的桌面像素）和轨道自身 1 DIP 的右边框污染，量出「墨宽 76 px」的假 FAIL ⇒ 改用 UIA 后不再依赖任何像素启发式。
+  2. 设置窗启动即最小化，`GetWindowRect` 会返回 −32000 哨兵，而最小化时 `BoundingRectangle` 是空矩形 ⇒ 必须先 `ShowWindow(hwnd, 9)` 再读几何。
+  3. 遗留（环境相关，非本缺陷）：`tools\verify-toggle-disc.ps1` 的前置步骤要在设置窗里找「窗格右缘」，它要求窗格与内容**两种色调可区分**；后台会话里设置窗拿不到前台，Mica 把整窗压成同一色调（实测 x=6 与内容列都读到 243），于是该前置判定失败并 `exit 1`。它检验的是**展开态**按钮悬停底板是否为圆（`PaneToggleButton` 模板，本轮一个字都没改），今天早些时候在同一台机器上是 6/6；本轮的等价几何断言由 `verify-nav-rail-center.ps1` 的展开态用例承担（把等待从 400 ms 加长到 1500 ms 也不改变该结果）。
