@@ -11,7 +11,12 @@ namespace TaskbarLyrics.App;
 /// </summary>
 public static class Diag
 {
-    private static readonly bool Enabled =
+    /// <summary>
+    /// True when <c>TBL_DIAG=1</c>. Exposed so that hot paths can skip the call entirely:
+    /// <c>Diag.Log($"{...}")</c> evaluates its argument at the call site, so the guard
+    /// inside <see cref="Log"/> does not save the formatting cost.
+    /// </summary>
+    public static bool Enabled { get; } =
         Environment.GetEnvironmentVariable("TBL_DIAG") == "1";
 
     private static readonly string LogPath = Path.Combine(

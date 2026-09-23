@@ -34,6 +34,20 @@ public sealed record PlaybackSnapshot(
     /// drifts further out of sync the longer the track runs.
     /// </summary>
     public double PlaybackRate { get; init; } = 1.0;
+
+    /// <summary>
+    /// The service's own identifier for this track, when the player publishes one.
+    /// <para>
+    /// NetEase Cloud Music exposes no id through the media session, but the InfLink-rs
+    /// plugin smuggles it through the genre field as <c>NCM-{id}</c>. Having the id means the
+    /// exact song's lyrics can be fetched directly rather than searched for, which removes a
+    /// whole class of wrong matches: a title-and-artist search can land on a cover, a live
+    /// take or a different edit, and none of those timings fit the recording being heard.
+    /// </para>
+    /// <para>Null when the player publishes nothing usable.</para>
+    /// </summary>
+    public string? ExactSourceId { get; init; }
+
     public static PlaybackSnapshot Empty { get; } = new(
         string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
         TimeSpan.Zero, TimeSpan.Zero, false, DateTimeOffset.MinValue);

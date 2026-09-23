@@ -115,27 +115,23 @@ internal static class FluentChrome
             // Chrome is cosmetic: never let it stop the window from opening.
         }
 
-        // The environment variable stays as a hard override for diagnosing a bad
-        // composite on a machine where the material misbehaves.
+        // The backdrop attribute is requested for completeness, but the window is now
+        // always painted opaque. A transparent client area is only safe when the frame has
+        // been extended over it, and that is exactly what hands input to DWM and breaks
+        // dragging and the caption buttons, so it is not done.
         bool wantMica = useMica && Environment.GetEnvironmentVariable("TBL_NO_MICA") != "1";
-        bool mica = wantMica && TryEnableMica(handle);
+        bool backdropAccepted = wantMica && TryEnableMica(handle);
 
-        if (mica)
-        {
-            window.Background = Brushes.Transparent;
-        }
-        else
-        {
-            var solid = dark ? Dark.WindowBg : Light.WindowBg;
-            TrySetColor(handle, DWMWA_CAPTION_COLOR, solid);
-            window.Background = new SolidColorBrush(solid);
-        }
+        var solid = dark ? Dark.WindowBg : Light.WindowBg;
+        TrySetColor(handle, DWMWA_CAPTION_COLOR, solid);
+        window.Background = new SolidColorBrush(solid);
 
-        // Tooltips are opaque: a translucent one over Mica reads as a smudge.
+        // Flat palette: with an opaque window the translucent variants would blend against
+        // the page instead of a material and come out muddy.
         var tooltipBg = dark ? Color.FromRgb(0x2B, 0x2B, 0x2B) : Color.FromRgb(0xF9, 0xF9, 0xF9);
-        ApplyPalette(window, dark ? Dark : Light, mica, tooltipBg);
+        ApplyPalette(window, dark ? Dark : Light, mica: false, tooltipBg);
 
-        Diag.Log($"[fluent] theme={(dark ? "dark" : "light")} requested={theme} mica={mica}");
+        Diag.Log($"[fluent] theme={(dark ? "dark" : "light")} requested={theme} backdropAttr={backdropAccepted} opaque=true");
     }
 
     /// <summary>Whether the system is using a dark app theme.</summary>
@@ -155,8 +151,19 @@ internal static class FluentChrome
     }
 
     /// <summary>
-    /// Merge the client area into the window frame and request the Mica backdrop. Both
-    /// steps are required: without the frame extension there is nowhere to render.
+    /// Request the Mica backdrop.
+    /// <para>
+    /// Deliberately does <b>not</b> call <c>DwmExtendFrameIntoClientArea</c>. Extending the
+    /// frame over the client area is what normally lets a backdrop show through, but it
+    /// also turns the whole window into frame, which hands hit testing to DWM: the window
+    /// then drags on any press-and-move and its caption buttons stop receiving clicks.
+    /// Calling it here would silently reintroduce both faults.
+    /// </para>
+    /// <para>
+    /// The attribute is still set, because on some builds the backdrop composites behind a
+    /// window that keeps an opaque client area. Where it does not, the opaque palette is
+    /// what gets drawn, so the window is correct either way.
+    /// </para>
     /// </summary>
     private static bool TryEnableMica(IntPtr handle)
     {
@@ -164,19 +171,7 @@ internal static class FluentChrome
 
         try
         {
-            var margins = new MARGINS { Left = -1, Right = -1, Top = -1, Bottom = -1 };
-            if (DwmExtendFrameIntoClientArea(handle, ref margins) != 0) return false;
-
-            if (!TrySetInt(handle, DWMWA_SYSTEMBACKDROP_TYPE, DWMSBT_MAINWINDOW))
-            {
-                // Frame extended with no backdrop to fill it would paint black, so put
-                // the frame back before giving up.
-                var none = new MARGINS();
-                DwmExtendFrameIntoClientArea(handle, ref none);
-                return false;
-            }
-
-            return true;
+            return TrySetInt(handle, DWMWA_SYSTEMBACKDROP_TYPE, DWMSBT_MAINWINDOW);
         }
         catch (DllNotFoundException)
         {

@@ -39,6 +39,28 @@
 
   <ItemGroup>
     <!--
+      MiSans — the optional built-in typeface offered first in the font drop-down.
+
+      The repository deliberately ships NO font file: the subset that inspired this
+      option was carved out of another application's install (see
+      docs/soda-taskbar-lyrics-parity.md §10.5), and typefaces carry their own licences
+      that are not ours to redistribute. Drop your own TTF at
+      Fonts\MiSans-subset.ttf (see Fonts\README.md) and the two items below pick it up;
+      without the file the build is unchanged and BundledFonts falls back to the system
+      font.
+
+      It is embedded as a WPF Resource (addressed by pack URI) and also copied next to
+      the executable, because some font-URI forms only resolve for a loose file:
+      BundledFonts probes both, so the ~1.9 MB duplication is deliberate.
+    -->
+    <Resource Include="Fonts\MiSans-subset.ttf" Condition="Exists('$(MSBuildProjectDirectory)\Fonts\MiSans-subset.ttf')" />
+    <Content Include="Fonts\MiSans-subset.ttf" Condition="Exists('$(MSBuildProjectDirectory)\Fonts\MiSans-subset.ttf')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
       IconSource.png is a build-time input for TaskbarLyrics.IconGen. Excluded so it
       is neither compiled into the assembly nor copied to the published output.
       (A WPF project would otherwise treat a loose .png as a Resource.)

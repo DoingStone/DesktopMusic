@@ -1,4 +1,8 @@
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using TaskbarLyrics.App.Configuration;
 using TaskbarLyrics.App.Interop;
@@ -15,11 +19,44 @@ namespace TaskbarLyrics.App;
 /// </summary>
 public partial class App : Application
 {
-    /// <summary>How often the playback position is sampled for rendering.</summary>
-    private static readonly TimeSpan RenderInterval = TimeSpan.FromMilliseconds(80);
+    /// <summary>
+    /// How often the playback position is sampled for rendering. This is the visual frame
+    /// cadence, not the timing source: the position itself is extrapolated by
+    /// <see cref="PlaybackClock"/>, so a late tick costs nothing but a choppier sweep. The
+    /// word highlight advances across the line, and at the original 80 ms it moved in visible
+    /// steps.
+    /// <para>
+    /// 8 ms rather than 16 ms because this is a <see cref="DispatcherTimer"/>: Windows
+    /// quantises its interval, and a 16 ms request was measured at ~25 ms per tick — a
+    /// ~40 fps ceiling no amount of per-frame optimisation could lift. Asking for 8 ms lands
+    /// on the display cadence (~60 fps measured) and <see cref="MinRenderIntervalMs"/> keeps
+    /// a machine with finer timer granularity from going far above that.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan RenderInterval = TimeSpan.FromMilliseconds(8);
+
+    /// <summary>Lower bound on the gap between two rendered frames, in milliseconds.</summary>
+    private const double MinRenderIntervalMs = 12;
+
+    /// <summary>Timestamp of the last rendered frame, for <see cref="MinRenderIntervalMs"/>.</summary>
+    private long _lastRenderTick;
 
     /// <summary>How often SMTC itself is polled for track/metadata changes.</summary>
     private static readonly TimeSpan MediaInterval = TimeSpan.FromMilliseconds(400);
+
+    // ---- frame-time statistics (diagnostics only) ------------------------
+    //
+    // The smoothness target is a per-frame cost, so it has to be measured rather than
+    // argued: when TBL_DIAG=1 the render tick is timed and a percentile summary is written
+    // every window. Behind Diag.Enabled so it costs nothing in normal use.
+
+    /// <summary>Frames per reported sample.</summary>
+    private const int FrameSampleWindow = 300;
+
+    private readonly double[] _frameTimes = new double[FrameSampleWindow];
+    private int _frameSampleCount;
+    private double _frameTimeSum;
+    private long _frameWindowStart;
 
     private AppSettings _settings = null!;
     private SmtcMediaSessionSource _media = null!;
@@ -35,9 +72,25 @@ public partial class App : Application
     private DispatcherTimer _mediaTimer = null!;
 
     private PlaybackSnapshot _track = PlaybackSnapshot.Empty;
+
+    /// <summary>
+    /// Turns the roughly once-per-second SMTC position into a frame-rate clock:
+    /// measures the real playback rate from the samples themselves and absorbs each
+    /// correction instead of snapping to it, so the highlight neither drifts nor
+    /// stutters. Fed on every poll, reset whenever playback is not continuous.
+    /// </summary>
+    private readonly PlaybackClock _clock = new();
+
     private LyricDocument? _document;
     private bool _resolving;
     private string _lastResolvedKey = string.Empty;
+
+    /// <summary>
+    /// Track whose artwork the strip is currently showing or waiting for. Read back after
+    /// the fetch so a picture that arrives after the track moved on is dropped instead of
+    /// being pasted over the new track's cover.
+    /// </summary>
+    private string _coverKey = string.Empty;
 
     /// <summary>
     /// Newest resolve request seen while one was already running, so a mid-lookup
@@ -130,7 +183,17 @@ public partial class App : Application
         {
             Interval = RenderInterval,
         };
-        _renderTimer.Tick += (_, _) => RenderTick();
+        _renderTimer.Tick += (_, _) =>
+        {
+            var now = Stopwatch.GetTimestamp();
+            if ((now - _lastRenderTick) * 1000.0 / Stopwatch.Frequency < MinRenderIntervalMs)
+            {
+                return;
+            }
+
+            _lastRenderTick = now;
+            RenderTick();
+        };
         _renderTimer.Start();
 
         // Populate immediately rather than waiting for the first tick.
@@ -284,9 +347,39 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// Tooltip for the "nothing is playing" state, which is often not the whole truth.
+    /// <para>
+    /// An empty overlay has two very different causes and they used to look identical: no
+    /// player is running, or a player is running that never told Windows what it is playing.
+    /// NetEase Cloud Music is the second case, and it is not something this app can work
+    /// around: its client launches with <c>--disable-features=MediaSessionService</c>, so it
+    /// deliberately publishes nothing to the OS and its playback position is simply not
+    /// observable from outside. Keeping the wording short - a tooltip is not the place for a
+    /// paragraph - and naming the cause so a blank strip does not read as a malfunction.
+    /// </para>
+    /// </summary>
+    private static string NoSessionHint()
+    {
+        var players = SmtcMediaSessionSource.RunningPlayersWithoutSession();
+        if (players.Count == 0) return "任务栏歌词 · 无播放";
+
+        // NetEase is the common one and cannot be fixed from here, so it gets its own wording.
+        if (players.Any(p => p.Contains("cloudmusic", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "任务栏歌词 · 网易云不向系统上报播放信息（原版限制），无法显示歌词";
+        }
+
+        return $"任务栏歌词 · 检测到 {string.Join("、", players)}，但未向系统注册播放信息";
+    }
+
     private void BuildResolver()
     {
         var providers = new List<ILyricProvider>();
+
+        // Registered first: it borrows the others to resolve identifiers, and word timing
+        // is strictly better than line timing when a match exists.
+        if (_settings.EnableWordLyrics) providers.Add(new AmllTtmlProvider());
 
         if (_settings.EnableQqMusic) providers.Add(new QqMusicProvider());
         if (_settings.EnableNetEase) providers.Add(new NetEaseProvider());
@@ -360,6 +453,15 @@ public partial class App : Application
             updated.EnableNetEase != _settings.EnableNetEase ||
             updated.EnableLrclib != _settings.EnableLrclib;
 
+        // Every hotkey edit used to re-register all four with the OS, on every option
+        // change - including ones that cannot possibly affect them, such as toggling the
+        // background panel. Comparing first keeps the click path to the work it needs.
+        bool hotkeysChanged =
+            updated.HotkeyPlayPause != _settings.HotkeyPlayPause ||
+            updated.HotkeyNextTrack != _settings.HotkeyNextTrack ||
+            updated.HotkeyPreviousTrack != _settings.HotkeyPreviousTrack ||
+            updated.HotkeyToggleOverlay != _settings.HotkeyToggleOverlay;
+
         // Position memory and autostart are owned by the app, not the dialog.
         updated.Positions = _settings.Positions;
         updated.StartWithWindows = _settings.StartWithWindows;
@@ -368,8 +470,16 @@ public partial class App : Application
 
         _overlay.UpdateSettings(_settings);
 
+        // Switching the cover back on has to fetch what the setting skipped earlier: an
+        // album's artwork usually stays the same for its whole length, so no track change
+        // is coming along to fetch it.
+        if (_settings.ShowCoverArt && _track.HasTrack && _coverKey != _lastResolvedKey)
+        {
+            _ = LoadCoverArtAsync(_lastResolvedKey);
+        }
+
         // Re-register shortcuts so edited bindings take effect immediately.
-        _hotkeys?.Apply(_settings);
+        if (hotkeysChanged) _hotkeys?.Apply(_settings);
 
         if (providersChanged)
         {
@@ -451,29 +561,121 @@ public partial class App : Application
             if (track is null || !track.HasTrack)
             {
                 _track = PlaybackSnapshot.Empty;
+                _clock.Reset();
                 _document = null;
                 _lastResolvedKey = string.Empty;
-                _tray.SetTooltip("任务栏歌词 · 无播放");
+                _coverKey = string.Empty;
+                _overlay.SetTrackInfo(null, null);
+                _overlay.SetCoverArt(null);
+                _tray.SetTooltip(NoSessionHint());
                 return;
             }
 
-            // Always refresh: this carries the position and its anchor timestamp.
-            _track = track;
-
             var key = track.CacheKey;
-            if (key == _lastResolvedKey) return;
+
+            // A different track — or the same title from a different player session —
+            // has no positional continuity with the previous one, so the clock must
+            // not extrapolate across the join.
+            var trackChanged = key != _lastResolvedKey;
+            if (trackChanged) _clock.Reset();
+
+            // Always refresh: this carries the position and its anchor timestamp, and
+            // the clock needs every one of them.
+            _track = track;
+            _clock.Observe(track, DateTimeOffset.Now);
+
+            if (!trackChanged) return;
 
             _lastResolvedKey = key;
             _document = null;
+            _overlay.SetTrackInfo(track.Title, track.Artist);
             _tray.SetTooltip($"任务栏歌词 · {track.Title} - {track.Artist}");
 
             // Fire and forget so a slow lookup cannot stall the polling loop.
             _ = ResolveAsync(track, key);
+
+            // Artwork travels on its own errand for the same reason: the read is a WinRT
+            // round trip that can hand back megabytes for one track, and none of that
+            // belongs in front of the poll that carries the playback position. Skipped
+            // outright when the cover is switched off, so a hidden picture costs nothing.
+            if (_settings.ShowCoverArt) _ = LoadCoverArtAsync(key);
         }
         catch
         {
             // Never let a polling failure tear down the app.
         }
+    }
+
+    /// <summary>
+    /// Fetch the artwork for <paramref name="key"/> and hand it to the strip.
+    /// <para>
+    /// Answers are matched back to the track they were requested for, because a picture can
+    /// arrive well after the listener has moved on, and pasting it then would label the new
+    /// track with the old track's cover. Decoding happens on the UI thread — images are
+    /// <see cref="DispatcherObject"/>s and cannot be created anywhere else — but only once
+    /// per track, from bytes that were already fetched off it.
+    /// </para>
+    /// </summary>
+    private async Task LoadCoverArtAsync(string key)
+    {
+        if (_coverKey == key) return;
+
+        _coverKey = key;
+
+        byte[]? bytes;
+        try
+        {
+            bytes = await _media.TryReadAlbumArtAsync(CancellationToken.None);
+        }
+        catch
+        {
+            return;
+        }
+
+        // The track changed while the read was in flight; that track's own fetch owns the
+        // cover now, and this answer is stale.
+        if (_coverKey != key || bytes is null || bytes.Length == 0) return;
+
+        try
+        {
+            _overlay.SetCoverArt(DecodeCoverArt(bytes));
+        }
+        catch
+        {
+            // An unreadable picture is a missing picture, not a failure worth reporting:
+            // the slot falls back to the placeholder.
+            _overlay.SetCoverArt(null);
+        }
+    }
+
+    /// <summary>
+    /// Decode album art down to the size the cover slot actually draws.
+    /// <para>
+    /// <see cref="BitmapImage.DecodePixelWidth"/> is what keeps this cheap: without it a
+    /// 3000 px cover is decoded at full size and only then scaled down by the render thread,
+    /// every frame. <see cref="BitmapCacheOption.OnLoad"/> plus a frozen result means the
+    /// stream can be released immediately, and the bitmap can then be used by the render
+    /// thread without a lock.
+    /// </para>
+    /// </summary>
+    private static ImageSource DecodeCoverArt(byte[] bytes)
+    {
+        var image = new BitmapImage();
+
+        using (var stream = new MemoryStream(bytes))
+        {
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+
+            // Twice the 28 DIP slot: enough for the 125-200% taskbar scalings this runs at,
+            // and still a decode so small it does not register.
+            image.DecodePixelWidth = 64;
+            image.StreamSource = stream;
+            image.EndInit();
+        }
+
+        image.Freeze();
+        return image;
     }
 
     /// <summary>
@@ -544,6 +746,57 @@ public partial class App : Application
     /// <summary>Per-frame render from the extrapolated playback position.</summary>
     private void RenderTick()
     {
+        if (!Diag.Enabled)
+        {
+            RenderTickCore();
+            return;
+        }
+
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            RenderTickCore();
+        }
+        finally
+        {
+            RecordFrameTime(started);
+        }
+    }
+
+    /// <summary>
+    /// Write one frame's cost into the rolling window, and log the window summary once it is
+    /// full. Percentiles come from a copy of the window so the ring buffer stays allocation-free.
+    /// </summary>
+    private void RecordFrameTime(long started)
+    {
+        var now = Stopwatch.GetTimestamp();
+        if (_frameWindowStart == 0) _frameWindowStart = now;
+
+        var ms = (now - started) * 1000.0 / Stopwatch.Frequency;
+        _frameTimes[_frameSampleCount++] = ms;
+        _frameTimeSum += ms;
+
+        if (_frameSampleCount < FrameSampleWindow) return;
+
+        var sorted = (double[])_frameTimes.Clone();
+        Array.Sort(sorted);
+        var seconds = (now - _frameWindowStart) / (double)Stopwatch.Frequency;
+
+        Diag.Log($"[perf] render tick n={FrameSampleWindow} " +
+                 $"fps={FrameSampleWindow / Math.Max(0.001, seconds):F1} " +
+                 $"mean={_frameTimeSum / FrameSampleWindow:F3}ms " +
+                 $"p50={sorted[FrameSampleWindow / 2]:F3}ms " +
+                 $"p95={sorted[(int)(FrameSampleWindow * 0.95)]:F3}ms " +
+                 $"max={sorted[FrameSampleWindow - 1]:F3}ms " +
+                 $"gen0={GC.CollectionCount(0)} gen1={GC.CollectionCount(1)}");
+
+        _frameSampleCount = 0;
+        _frameTimeSum = 0;
+        _frameWindowStart = now;
+    }
+
+    private void RenderTickCore()
+    {
         if (!_settings.Visible)
         {
             if (_overlay.IsVisible) _overlay.Hide();
@@ -562,7 +815,7 @@ public partial class App : Application
         // Song progress reflects playback regardless of lyric state, so it is updated
         // before the lyric early-returns below. The lyric sync offset is deliberately
         // not applied: that shifts lyrics relative to the voice, not the clock.
-        _overlay.SetProgress(_track.ExtrapolatedPosition(DateTimeOffset.Now), _track.Duration);
+        _overlay.SetProgress(_clock.Position(DateTimeOffset.Now), _track.Duration);
 
         if (!_track.IsPlaying && !_settings.ShowWhenPaused)
         {
@@ -591,7 +844,7 @@ public partial class App : Application
             return;
         }
 
-        var position = _track.ExtrapolatedPosition(DateTimeOffset.Now)
+        var position = _clock.Position(DateTimeOffset.Now)
                        + TimeSpan.FromMilliseconds(_settings.GlobalOffsetMs);
 
         if (position < TimeSpan.Zero) position = TimeSpan.Zero;

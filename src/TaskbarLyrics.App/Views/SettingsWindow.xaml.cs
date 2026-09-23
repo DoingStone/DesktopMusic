@@ -1,5 +1,8 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Interop;
 using System.Windows.Media;
 using TaskbarLyrics.App.Configuration;
 
@@ -72,6 +75,10 @@ public partial class SettingsWindow : Window
             // merged into the frame, and without that a transparent client area
             // renders black (the previous bug).
             Interop.FluentChrome.Apply(this, _working.Theme, _working.UseMica);
+
+            // Added after the chrome is applied so this hook runs first and owns the
+            // resize band.
+            if (PresentationSource.FromVisual(this) is HwndSource src) src.AddHook(HitTestHook);
         };
 
         _original = settings.Clone();
@@ -154,26 +161,339 @@ public partial class SettingsWindow : Window
     private void OnToggleNav(object sender, RoutedEventArgs e) =>
         ApplyNavCollapsed(!_working.NavCollapsed, persist: true);
 
+    /// <summary>
+    /// Width of the navigation pane collapsed to an icon-only rail.
+    /// <para>
+    /// Sized so the row pill comes out square while keeping the wide pane's vertical
+    /// padding, which is what makes the icon pitch identical in both states: pill width =
+    /// rail - 12 (list margins) - 3 (accent bar) - 3/8 (pill margins) = rail - 26, and the
+    /// pill is 18 + 10 + 10 = 38 tall, so 64 gives 38x38.
+    /// </para>
+    /// </summary>
+    private const double RailWidth = 64;
+
+    /// <summary>Must match the toggle button's Width in XAML.</summary>
+    private const double NavToggleWidth = 36;
+
+    /// <summary>Content kept usable, which caps how wide the pane may be dragged.</summary>
+    private const double ContentMinWidth = 400;
+
+    /// <summary>
+    /// Narrowest the pane may be while it is still presented as the wide pane.
+    /// <para>
+    /// It is not the rail width. At rail width the expanded layout is incoherent: the nav
+    /// labels are clipped away (so it looks like the rail) while the title row still shows
+    /// the app identity, and the toggle then lands on top of it. The identity needs about
+    /// 113 DIP and the toggle 44, so 168 keeps a gap between them. Collapsing is what the
+    /// toggle is for; the sash does not need to reach rail width.
+    /// </para>
+    /// </summary>
+    private const double MinExpandedNavWidth = 168;
+
+    /// <summary>
+    /// Width of the window's resize band, in DIP. Kept in step with
+    /// WindowChrome.ResizeBorderThickness but enforced here as well.
+    /// </summary>
+    private const double ResizeBand = 8;
+
+    private const int WmNcHitTest = 0x0084;
+
+    // HT* codes returned to the OS to start a resize.
+    private const int HtLeft = 10, HtRight = 11, HtTop = 12;
+    private const int HtTopLeft = 13, HtTopRight = 14, HtBottom = 15;
+    private const int HtBottomLeft = 16, HtBottomRight = 17;
+
+    /// <summary>
+    /// Make the window's outer band resize the window, and start that resize ourselves.
+    /// <para>
+    /// Reporting the <c>HT*</c> code from <c>WM_NCHITTEST</c> is not enough here. With
+    /// <c>GlassFrameThickness="-1"</c> the entire client area is window frame, so DWM
+    /// arbitrates the non-client area and a real press never reaches the sizing-border
+    /// path - the code is correct when asked directly, and nothing happens when dragged.
+    /// </para>
+    /// <para>
+    /// So the press itself is intercepted: releasing capture and re-sending it as a
+    /// non-client press is what puts Windows into its own resize loop. That does not
+    /// depend on anyone agreeing that the band is a border.
+    /// </para>
+    /// </summary>
+    private IntPtr HitTestHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WmNcHitTest)
+        {
+            // WM_NCHITTEST carries SCREEN coordinates.
+            int hit = ResizeCodeAt(lParam, isClientSpace: false);
+            if (hit == 0) return IntPtr.Zero;
+
+            handled = true;
+            return new IntPtr(hit);
+        }
+
+        // WindowChrome has no caption (CaptionHeight=0), so the title strip is dragged
+        // from here. Handing the press to the non-client path is what starts the OS move
+        // loop.
+        if (msg == WmLButtonDown || msg == WmLButtonDblClk)
+        {
+            // Mouse messages carry CLIENT coordinates. Passing them through the screen
+            // path subtracts the window origin twice and yields a large negative value that
+            // falls inside the edge band, which is what turned every press into a border
+            // grab.
+            LocalPoint(lParam, isClientSpace: true, out var local, out bool valid);
+            if (!valid) return IntPtr.Zero;
+
+            int hit = ResizeCodeAt(lParam, isClientSpace: true);
+            if (hit != 0)
+            {
+                handled = true;
+                ReleaseCapture();
+                SendMessage(hwnd, WmNcLButtonDown, new IntPtr(hit), lParam);
+                return IntPtr.Zero;
+            }
+
+            // Only the strip above the content, and never on top of a control.
+            if (local.Y > TitleStripHeight || IsOverControl(local)) return IntPtr.Zero;
+
+            handled = true;
+            ReleaseCapture();
+
+            if (msg == WmLButtonDblClk)
+            {
+                WindowState = WindowState == WindowState.Maximized
+                    ? WindowState.Normal
+                    : WindowState.Maximized;
+            }
+            else
+            {
+                SendMessage(hwnd, WmNcLButtonDown, new IntPtr(HtCaption), lParam);
+            }
+
+            return IntPtr.Zero;
+        }
+
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Convert a message's lParam to this window's coordinates.
+    /// <para>
+    /// The two messages do <b>not</b> share a coordinate space, and treating them alike is
+    /// what made every press look like a window-border grab:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><c>WM_NCHITTEST</c> passes <b>screen</b> pixels, so it needs
+    /// <see cref="UIElement.PointFromScreen"/>.</item>
+    /// <item><c>WM_LBUTTONDOWN</c> / <c>WM_LBUTTONDBLCLK</c> pass <b>client</b> pixels,
+    /// which only need dividing by the DPI scale.</item>
+    /// </list>
+    /// <para>
+    /// Passing client coordinates to <c>PointFromScreen</c> subtracts the window origin a
+    /// second time and yields a large negative value, which lands inside the edge band.
+    /// That turned a press on the sash into a left-border resize (the window changed size)
+    /// and a press on the close button into a top-border resize (the button never fired).
+    /// </para>
+    /// </summary>
+    private void LocalPoint(IntPtr lParam, bool isClientSpace, out Point local, out bool valid)
+    {
+        local = default;
+        valid = false;
+
+        int packed = lParam.ToInt32();
+        int x = (short)(packed & 0xFFFF);
+        int y = (short)((packed >> 16) & 0xFFFF);
+
+        try
+        {
+            if (isClientSpace)
+            {
+                var dpi = VisualTreeHelper.GetDpi(this);
+                local = new Point(x / dpi.DpiScaleX, y / dpi.DpiScaleY);
+            }
+            else
+            {
+                local = PointFromScreen(new Point(x, y));
+            }
+
+            valid = true;
+        }
+        catch
+        {
+            // Leave valid false.
+        }
+    }
+
+    /// <summary>
+    /// The HT* resize code for a screen point, or 0 when the point is not in the outer
+    /// band.
+    /// <para>
+    /// The band takes priority over the caption - the outer pixels resize, the rest of the
+    /// top strip drags the window - but it must <b>never</b> take priority over a control.
+    /// The caption buttons sit in the top-right corner, so their top and right edges are
+    /// inside the band; without the guard the band swallowed them and the window could not
+    /// be closed or the pane collapsed.
+    /// </para>
+    /// </summary>
+    private int ResizeCodeAt(IntPtr lParam, bool isClientSpace)
+    {
+        // A maximized window has no edges to drag.
+        if (WindowState != WindowState.Normal) return 0;
+
+        LocalPoint(lParam, isClientSpace, out var local, out bool valid);
+        if (!valid) return 0;
+
+        // Controls win over the band. Checked first because a button straddling the edge
+        // is indistinguishable from the edge by coordinates alone.
+        if (IsOverControl(local)) return 0;
+
+        bool left = local.X <= ResizeBand;
+        bool right = local.X >= ActualWidth - ResizeBand;
+        bool top = local.Y <= ResizeBand;
+        bool bottom = local.Y >= ActualHeight - ResizeBand;
+
+        if (top && left) return HtTopLeft;
+        if (top && right) return HtTopRight;
+        if (bottom && left) return HtBottomLeft;
+        if (bottom && right) return HtBottomRight;
+        if (left) return HtLeft;
+        if (right) return HtRight;
+        if (top) return HtTop;
+        if (bottom) return HtBottom;
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Whether the point lands on a clickable control, walking up from whatever WPF hit
+    /// tests. Buttons near the window edge must keep working, so this takes precedence
+    /// over the resize band.
+    /// </summary>
+    private bool IsOverControl(Point local)
+    {
+        try
+        {
+            var hit = InputHitTest(local) as DependencyObject;
+
+            while (hit is not null)
+            {
+                if (hit is System.Windows.Controls.Primitives.ButtonBase) return true;
+
+                hit = hit is Visual or System.Windows.Media.Media3D.Visual3D
+                    ? VisualTreeHelper.GetParent(hit)
+                    : null;
+            }
+        }
+        catch
+        {
+            // A failed hit test must not block resizing.
+        }
+
+        return false;
+    }
+
+    /// <summary>Height of the draggable title strip, matching the layout row.</summary>
+    private const double TitleStripHeight = 32;
+
+    private const int HtCaption = 2;
+    private const int WmLButtonDown = 0x0201;
+    private const int WmLButtonDblClk = 0x0203;
+    private const int WmNcLButtonDown = 0x00A1;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    /// <summary>
+    /// The sash was dragged: remember the width so the pane reopens at the size the user
+    /// chose rather than snapping back to the default.
+    /// </summary>
+    private void OnNavSplitterDragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (_working.NavCollapsed) return;
+
+        var width = NavColumn.ActualWidth;
+        if (width < NavColumn.MinWidth) return;
+
+        _working.NavWidth = width;
+        _applyLive(_working);
+        SetStatus($"侧栏宽度已设为 {width:0}");
+    }
+
+    /// <summary>
+    /// Bound the sash. Neither bound is the rail width: the rail is a separate presentation
+    /// reached from the toggle, and letting the sash reach it produced a clipped pane whose
+    /// title row overlapped itself. The wide pane keeps room for the identity plus the
+    /// toggle, and the upper bound leaves the content a usable minimum.
+    /// </summary>
+    private void UpdateNavLimits()
+    {
+        if (ActualWidth <= 0) return;
+
+        NavColumn.MinWidth = _working.NavCollapsed ? 0 : MinExpandedNavWidth;
+        NavColumn.MaxWidth = Math.Max(MinExpandedNavWidth, ActualWidth - ContentMinWidth);
+    }
+
     private void ApplyNavCollapsed(bool collapsed, bool persist)
     {
         _working.NavCollapsed = collapsed;
 
-        NavColumn.Width = collapsed ? new GridLength(0) : new GridLength(232);
-        NavPane.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
-        TitleFiller.Margin = collapsed ? new Thickness(0) : new Thickness(232, 0, 0, 0);
+        // Collapsing narrows the pane to an icon rail rather than removing it, so the
+        // navigation stays one click away instead of two. Expanding restores whatever width
+        // the sash was left at, clamped so a width saved before the lower bound existed
+        // cannot come back narrower than the title row can render.
+        var expandedWidth = Math.Max(
+            MinExpandedNavWidth,
+            _working.NavWidth >= MinExpandedNavWidth ? _working.NavWidth : 232);
+        NavColumn.Width = collapsed ? new GridLength(RailWidth) : new GridLength(expandedWidth);
+        NavColumn.MinWidth = collapsed ? 0 : MinExpandedNavWidth;
+        NavSplitter.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
 
-        // The identity belongs to the navigation pane, so it goes with it. The toggle has
-        // to survive the collapse or there would be no way back, so it moves from the
-        // pane's right edge to the window's left edge.
+        // The sash draws the divider while it is visible; when it is hidden the pane must
+        // draw its own right edge, or the rail would have no edge at all.
+        NavPane.BorderBrush = (Brush)FindResource("Line");
+        NavPane.BorderThickness = collapsed ? new Thickness(0, 0, 1, 0) : new Thickness(0);
+
+        // Labels go; the icons stay and centre in the pill, which is why the item Padding
+        // bound by the template drops to zero horizontally.
+        var labels = new[] { NavLabel1, NavLabel2, NavLabel3, NavLabel4, NavLabel5, NavLabel6 };
+        foreach (var label in labels)
+        {
+            label.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        // Vertical values match the wide pane exactly (top margin 10, item padding 10) so
+        // the icon pitch does not change when the pane collapses; only the horizontal
+        // values differ, to centre a lone icon where there used to be an icon plus label.
+        NavList.Margin = collapsed ? new Thickness(6, 10, 6, 12) : new Thickness(8, 10, 0, 12);
+
+        foreach (var item in NavList.Items)
+        {
+            if (item is ListBoxItem row)
+            {
+                row.Padding = collapsed
+                    ? new Thickness(0, 10, 0, 10)
+                    : new Thickness(13, 10, 13, 10);
+
+                // Wide: icon and label start at the left edge. Rail: the lone icon centres
+                // in the pill. Driving it through HorizontalContentAlignment keeps the
+                // template free of a hard-coded alignment.
+                row.HorizontalContentAlignment = collapsed
+                    ? HorizontalAlignment.Center
+                    : HorizontalAlignment.Left;
+            }
+        }
+
+        // The toggle lives in the pane header now, so it needs no repositioning here: the
+        // pane lays it out at its right edge at any width. Only the identity goes, since it
+        // cannot fit in the rail.
         TitleIdentity.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
-        NavToggleButton.Margin = collapsed
-            ? new Thickness(8, 0, 0, 0)
-            : new Thickness(196, 0, 0, 0);
+        UpdateNavLimits();
 
         if (persist)
         {
             _applyLive(_working);
-            SetStatus(collapsed ? "左侧栏已收起" : "左侧栏已展开");
+            SetStatus(collapsed ? "左侧栏已收起为图标栏" : "左侧栏已展开");
         }
     }
 
@@ -189,7 +509,8 @@ public partial class SettingsWindow : Window
             _ => Interop.FluentChrome.ThemeSystem,
         };
 
-        Interop.FluentChrome.Apply(this, _working.Theme, _working.UseMica);
+        // Forced: the combo changed, so the material genuinely needs re-pushing.
+        ApplyChrome(force: true);
         _applyLive(_working);
         SetStatus("主题已更新");
     }
@@ -332,6 +653,10 @@ public partial class SettingsWindow : Window
             if (added.Add(name)) ordered.Add(name);
         }
 
+        // The bundled MiSans subset is compiled into the assembly, so it never
+        // shows up in the system font collection - offer it explicitly at the top.
+        ordered.Insert(0, BundledFonts.MiSansDisplayName);
+
         foreach (var name in ordered) FontCombo.Items.Add(name);
 
         // The configured font may not be enumerable (e.g. a font alias); keep it
@@ -384,9 +709,11 @@ public partial class SettingsWindow : Window
             BackgroundColorField.ColorValue = _working.BackgroundColor;
 
             ShowBackgroundCheck.IsChecked = _working.ShowBackground;
+            AutoAdaptColorsCheck.IsChecked = _working.AutoAdaptColors;
             WordHighlightCheck.IsChecked = _working.EnableWordHighlight;
             ShowTranslationCheck.IsChecked = _working.ShowTranslation;
             ShowContextCheck.IsChecked = _working.ShowContextLines;
+            LineTransitionCheck.IsChecked = _working.LineTransition;
             CornerSlider.Value = Clamp(_working.BackgroundCornerRadius, CornerSlider.Minimum, CornerSlider.Maximum);
 
             WidthSlider.Value = Clamp(_working.Width, WidthSlider.Minimum, WidthSlider.Maximum);
@@ -399,7 +726,11 @@ public partial class SettingsWindow : Window
             InteractiveCheck.IsChecked = _working.Interactive;
             PlaceAboveCheck.IsChecked = _working.PlaceAboveTaskbar;
             TransportControlsCheck.IsChecked = _working.ShowTransportControls;
+            HoverRevealControlsCheck.IsChecked = _working.HoverRevealControls;
             SongProgressCheck.IsChecked = _working.ShowSongProgress;
+            SongTitleCheck.IsChecked = _working.ShowSongTitle;
+            SongArtistCheck.IsChecked = _working.ShowSongArtist;
+            CoverArtCheck.IsChecked = _working.ShowCoverArt;
             VisibleCheck.IsChecked = _working.Visible;
             ShowWhenPausedCheck.IsChecked = _working.ShowWhenPaused;
             HideWhenNoLyricsCheck.IsChecked = _working.HideWhenNoLyrics;
@@ -410,7 +741,8 @@ public partial class SettingsWindow : Window
             HotkeyPreviousBox.Text = _working.HotkeyPreviousTrack;
             HotkeyToggleBox.Text = _working.HotkeyToggleOverlay;
 
-            QqMusicCheck.IsChecked = _working.EnableQqMusic;
+            WordLyricsCheck.IsChecked = _working.EnableWordLyrics;
+        QqMusicCheck.IsChecked = _working.EnableQqMusic;
             NetEaseCheck.IsChecked = _working.EnableNetEase;
             LrclibCheck.IsChecked = _working.EnableLrclib;
 
@@ -438,9 +770,11 @@ public partial class SettingsWindow : Window
         _working.BackgroundColor = BackgroundColorField.ColorValue;
 
         _working.ShowBackground = ShowBackgroundCheck.IsChecked == true;
+        _working.AutoAdaptColors = AutoAdaptColorsCheck.IsChecked == true;
         _working.EnableWordHighlight = WordHighlightCheck.IsChecked == true;
         _working.ShowTranslation = ShowTranslationCheck.IsChecked == true;
         _working.ShowContextLines = ShowContextCheck.IsChecked == true;
+        _working.LineTransition = LineTransitionCheck.IsChecked == true;
         _working.BackgroundCornerRadius = CornerSlider.Value;
 
         _working.Width = WidthSlider.Value;
@@ -453,7 +787,11 @@ public partial class SettingsWindow : Window
         _working.Interactive = InteractiveCheck.IsChecked == true;
         _working.PlaceAboveTaskbar = PlaceAboveCheck.IsChecked == true;
         _working.ShowTransportControls = TransportControlsCheck.IsChecked == true;
+        _working.HoverRevealControls = HoverRevealControlsCheck.IsChecked == true;
         _working.ShowSongProgress = SongProgressCheck.IsChecked == true;
+        _working.ShowSongTitle = SongTitleCheck.IsChecked == true;
+        _working.ShowSongArtist = SongArtistCheck.IsChecked == true;
+        _working.ShowCoverArt = CoverArtCheck.IsChecked == true;
         _working.Visible = VisibleCheck.IsChecked == true;
         _working.ShowWhenPaused = ShowWhenPausedCheck.IsChecked == true;
         _working.HideWhenNoLyrics = HideWhenNoLyricsCheck.IsChecked == true;
@@ -478,6 +816,7 @@ public partial class SettingsWindow : Window
             }
         }
 
+        _working.EnableWordLyrics = WordLyricsCheck.IsChecked == true;
         _working.EnableQqMusic = QqMusicCheck.IsChecked == true;
         _working.EnableNetEase = NetEaseCheck.IsChecked == true;
         _working.EnableLrclib = LrclibCheck.IsChecked == true;
@@ -601,11 +940,32 @@ public partial class SettingsWindow : Window
     private void OnOptionChanged(object sender, RoutedEventArgs e)
     {
         ApplyLive();
+        ApplyChrome();
+    }
 
-        // The material is a property of this window, so it has to be pushed to it rather
-        // than only written to the settings file.
+    /// <summary>
+    /// Re-apply the window material, but only when it actually changed.
+    /// <para>
+    /// This used to run on every option change, including ones with nothing to do with the
+    /// window chrome such as the background-panel toggle. It is expensive: it sets several
+    /// DWM attributes, replaces the window's background brush, and swaps sixteen dynamic
+    /// resource keys, which invalidates every element that references them. Both windows
+    /// share one UI thread, so that whole-window repaint blocked the overlay's - and the
+    /// background panel appeared to change late.
+    /// </para>
+    /// </summary>
+    private void ApplyChrome(bool force = false)
+    {
+        if (!force && _chromeTheme == _working.Theme && _chromeMica == _working.UseMica) return;
+
+        _chromeTheme = _working.Theme;
+        _chromeMica = _working.UseMica;
         Interop.FluentChrome.Apply(this, _working.Theme, _working.UseMica);
     }
+
+    /// <summary>Theme and material last pushed to the window, for <see cref="ApplyChrome"/>.</summary>
+    private string? _chromeTheme;
+    private bool _chromeMica;
 
 
     /// <summary>Colour picker edits (ColorField raises a plain CLR event).</summary>
@@ -629,10 +989,17 @@ public partial class SettingsWindow : Window
         // assignments raise ValueChanged before the constructor body runs.
         if (_loading || _working is null || _applyLive is null) return;
 
+        // Timed because this runs on the shared UI thread: anything slow here delays the
+        // overlay's repaint as well, which is what made the background panel look late.
+        var started = System.Diagnostics.Stopwatch.StartNew();
+
         ReadIntoWorking();
         UpdateValueLabels();
         _applyLive(_working);
         SetStatus("修改已即时生效（尚未保存）");
+
+        Diag.Log($"[settings] apply-live {started.ElapsedMilliseconds} ms " +
+                 $"(showBg={_working.ShowBackground})");
     }
 
     // ---- position nudging ----------------------------------------------

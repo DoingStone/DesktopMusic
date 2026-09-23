@@ -19,14 +19,71 @@ public static class LyricMatcher
     private const double ArtistWeight = 30;
     private const double DurationWeight = 15;
 
-    /// <summary>Duration differences beyond this are treated as a different recording.</summary>
-    private static readonly TimeSpan DurationTolerance = TimeSpan.FromSeconds(30);
+    /// <summary>
+    /// Beyond this the candidate is a different recording, not the same one loosely
+    /// measured.
+    /// <para>
+    /// A different recording means every timestamp in the file is wrong: the highlight
+    /// drifts further out of step as the song runs, and the lyrics read correctly while the
+    /// timing does not. That is worse than showing nothing, so this disqualifies the
+    /// candidate instead of merely costing it points. Previously a 30 s tolerance worth 15
+    /// points let a live take or a cover keep roughly 85 and be accepted.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan DurationMismatchLimit = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// Within this the two are the same recording; the slack covers leading silence and
+    /// differing encoder padding.
+    /// </summary>
+    private static readonly TimeSpan DurationMatchLimit = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Whether the lyrics come from the service that is playing.
+    /// <para>
+    /// The media session reports its source as an executable name ("QQMusic.exe"), not as one
+    /// of our provider kinds, so this is a substring match against the known players. An
+    /// unknown player simply matches nothing.
+    /// </para>
+    /// <para>
+    /// Deliberately not folded into <see cref="Score"/>. The score is clamped to 0..100 and
+    /// two candidates for the same recording routinely both reach 100, so a bonus added
+    /// there would vanish exactly when it is needed. The resolver uses this as a tie-break
+    /// instead, which keeps the calibrated meaning of the confidence thresholds intact.
+    /// </para>
+    /// </summary>
+    public static bool MatchesPlayingService(string? sourceAppId, LyricSourceKind source)
+    {
+        if (string.IsNullOrWhiteSpace(sourceAppId)) return false;
+
+        return source switch
+        {
+            LyricSourceKind.QqMusic => Contains(sourceAppId, "qqmusic"),
+            LyricSourceKind.NetEase =>
+                Contains(sourceAppId, "cloudmusic") || Contains(sourceAppId, "netease"),
+            LyricSourceKind.Kugou =>
+                Contains(sourceAppId, "kugou") || Contains(sourceAppId, "kuwo"),
+            _ => false,
+        };
+
+        static bool Contains(string haystack, string needle) =>
+            haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Returns 0..100. A score of 80+ means "confident", 90+ means "use
     /// immediately without waiting for other sources".
+    /// <para>
+    /// <paramref name="ignoreDuration"/> disables the different-recording check. It exists
+    /// for the resolver's second pass: the check is right when it works, but it depends on
+    /// both sides reporting a comparable length, and that is not guaranteed. A streamed
+    /// trial clip, a player that reports a different figure from its own catalogue, or a
+    /// provider with a stale entry all make every candidate look like a different
+    /// recording - and refusing all of them would leave the listener with no lyrics at all,
+    /// which is worse than lyrics whose timing is merely suspect.
+    /// </para>
     /// </summary>
-    public static double Score(PlaybackSnapshot track, LyricCandidate candidate)
+    public static double Score(PlaybackSnapshot track, LyricCandidate candidate, bool ignoreDuration = false)
     {
         if (!track.HasTrack) return 0;
 
@@ -35,7 +92,13 @@ public static class LyricMatcher
         // separately as a penalty, not folded into the title similarity.
         var title = Similarity(StripQualifiers(track.Title), StripQualifiers(candidate.Title));
         var artist = ArtistSimilarity(track.Artist, candidate.Artist);
-        var duration = DurationSimilarity(track.Duration, candidate.Duration);
+
+        // A different recording cannot be timed correctly, whatever else agrees.
+        if (!ignoreDuration && IsDifferentRecording(track.Duration, candidate.Duration)) return 0;
+
+        var duration = ignoreDuration
+            ? 0.5
+            : DurationSimilarity(track.Duration, candidate.Duration);
 
         var score = (title * TitleWeight) + (artist * ArtistWeight) + (duration * DurationWeight);
 
@@ -52,6 +115,18 @@ public static class LyricMatcher
 
         return Math.Clamp(score, 0, 100);
     }
+
+    /// <summary>
+    /// Whether the two durations cannot belong to the same recording. An unknown duration on
+    /// either side is never a mismatch: most search results do carry a length, but a missing
+    /// one must not disqualify an otherwise good candidate.
+    /// </summary>
+    private static bool IsDifferentRecording(TimeSpan target, TimeSpan candidate)
+    {
+        if (target <= TimeSpan.Zero || candidate <= TimeSpan.Zero) return false;
+        return (target - candidate).Duration() > DurationMismatchLimit;
+    }
+
 
     /// <summary>Title similarity below which a version marker is not considered.</summary>
     private const double TitleMatchFloor = 0.7;
@@ -188,9 +263,16 @@ public static class LyricMatcher
         if (target <= TimeSpan.Zero || candidate <= TimeSpan.Zero) return 0.5;
 
         var delta = (target - candidate).Duration();
-        if (delta >= DurationTolerance) return 0;
 
-        return 1.0 - (delta.TotalSeconds / DurationTolerance.TotalSeconds);
+        // Same recording: full credit. Beyond the match limit the credit falls away, and
+        // beyond the mismatch limit Score has already disqualified the candidate.
+        if (delta <= DurationMatchLimit) return 1.0;
+
+        var span = DurationMismatchLimit - DurationMatchLimit;
+        if (span <= TimeSpan.Zero) return 0;
+
+        var excess = delta - DurationMatchLimit;
+        return Math.Max(0, 1.0 - (excess.TotalSeconds / span.TotalSeconds));
     }
 
     /// <summary>

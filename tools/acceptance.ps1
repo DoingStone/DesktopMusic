@@ -37,7 +37,10 @@ if ($srcMatch.Success) {
     $lines = [int]$srcMatch.Groups[3].Value
     Check "match score acceptable" ($score -ge 78) ("score=$score")
     Check "lyric lines parsed"     ($lines -gt 5)  ("lines=$lines")
-    Check "source is a real provider" ($srcMatch.Groups[1].Value -in @('QqMusic','NetEase','Lrclib')) $srcMatch.Groups[1].Value
+    # AmllTtml is the fourth provider (word-level TTML from the AMLL database). It wins the
+    # match whenever its entry scores best, so leaving it out made this check fail for a
+    # healthy app on songs the other three sources do not cover.
+    Check "source is a real provider" ($srcMatch.Groups[1].Value -in @('QqMusic','NetEase','Lrclib','AmllTtml')) $srcMatch.Groups[1].Value
 }
 
 Write-Host ""
@@ -93,33 +96,48 @@ if ($script:ov) {
     Check "overlay positioned at screen bottom" ($r.B -ge ($screenH - 70) -and $r.T -gt ($screenH - 200)) ("bottom=$($r.B)")
     Check "overlay height fits taskbar"         (($r.B - $r.T) -ge 20 -and ($r.B - $r.T) -le 90) ("h=$($r.B-$r.T)")
 
-    $bmp = New-Object System.Drawing.Bitmap ($r.R-$r.L), ($r.B-$r.T)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen($r.L, $r.T, 0, 0, (New-Object System.Drawing.Size ($r.R-$r.L), ($r.B-$r.T)))
-    $g.Dispose()
-
-    $colors = @{}; $total = 0
-    for ($y=0; $y -lt $bmp.Height; $y += 2) {
-        for ($x=0; $x -lt $bmp.Width; $x += 2) {
-            $c = $bmp.GetPixel($x,$y); $total++
-            $k = "$($c.R),$($c.G),$($c.B)"
-            if ($colors.ContainsKey($k)) { $colors[$k]++ } else { $colors[$k] = 1 }
+    # Photograph the overlay's own rectangle; the histogram is sampled on a 2 px grid.
+    function Get-OverlaySample($rect) {
+        $b = New-Object System.Drawing.Bitmap ($rect.R-$rect.L), ($rect.B-$rect.T)
+        $g = [System.Drawing.Graphics]::FromImage($b)
+        $g.CopyFromScreen($rect.L, $rect.T, 0, 0, (New-Object System.Drawing.Size ($rect.R-$rect.L), ($rect.B-$rect.T)))
+        $g.Dispose()
+        $hist = @{}
+        for ($y=0; $y -lt $b.Height; $y += 2) {
+            for ($x=0; $x -lt $b.Width; $x += 2) {
+                $c = $b.GetPixel($x,$y)
+                $k = "$($c.R),$($c.G),$($c.B)"
+                if ($hist.ContainsKey($k)) { $hist[$k]++ } else { $hist[$k] = 1 }
+            }
         }
+        return [pscustomobject]@{ Bitmap = $b; Hist = $hist }
     }
+
+    $shot = Get-OverlaySample $r
+    $colors = $shot.Hist
     $distinct = $colors.Count
     Write-Host "        distinct colours in overlay region: $distinct"
 
     # A blank/invisible overlay is a single flat colour; real text+panel gives many.
     Check "overlay is actually painting" ($distinct -gt 12) ("distinct=$distinct")
 
-    # The highlight colour should appear when a line is being sung. Compare against
-    # the CONFIGURED colour rather than a hard-coded one: the user (or another
-    # test) may legitimately have changed it, and a literal here made the suite
+    # The ink colour must match what the settings ask for, and there are two legitimate
+    # modes now:
+    #   - AutoAdaptColors (the default): the overlay samples the taskbar, then paints the
+    #     lyrics near-black on a light bar / near-white on a dark one, so the assertion is
+    #     about the shape of that contract rather than a fixed value.
+    #   - otherwise: the configured HighlightColor has to be visible while a line is sung.
+    # Compare against the CONFIGURED colour rather than a hard-coded one: the user (or
+    # another test) may legitimately have changed it, and a literal here made the suite
     # fail for a perfectly healthy app.
     $configured = $null
+    $autoAdapt = $true   # AppSettings default when the key is absent
     if (Test-Path $settings) {
         try {
             $cfg = Get-Content $settings -Raw | ConvertFrom-Json
+            if ($null -ne $cfg.PSObject.Properties['AutoAdaptColors']) {
+                $autoAdapt = [bool]$cfg.AutoAdaptColors
+            }
             $hex = $cfg.HighlightColor
             if ($hex -match '^#(?:[0-9A-Fa-f]{2})?([0-9A-Fa-f]{6})$') {
                 $rgb = $Matches[1]
@@ -131,7 +149,41 @@ if ($script:ov) {
         } catch { }
     }
 
-    if ($configured) {
+    if ($autoAdapt) {
+        # Lyrics are neutral; taskbar icons showing through the strip are not. So "neutral
+        # AND at least 60 luma away from the bar" is the overlay's own ink. The test is
+        # time-sensitive - right after a line change very little of the line is painted
+        # yet - so sample again rather than mistaking that for a broken palette.
+        $inkHit = $null; $inkTry = 0; $barKey = ''; $barLuma = 0
+        while ($inkTry -lt 5 -and -not $inkHit) {
+            $inkTry++
+            $dom = $colors.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1
+            $barKey = $dom.Key
+            $dp = $barKey.Split(',') | ForEach-Object { [int]$_ }
+            $barLuma = 0.2126*$dp[0] + 0.7152*$dp[1] + 0.0722*$dp[2]
+
+            foreach ($k in $colors.Keys) {
+                $q = $k.Split(',') | ForEach-Object { [int]$_ }
+                $max = ($q | Measure-Object -Maximum).Maximum
+                $min = ($q | Measure-Object -Minimum).Minimum
+                $lum = 0.2126*$q[0] + 0.7152*$q[1] + 0.0722*$q[2]
+                if (($max - $min) -le 26 -and
+                    (($barLuma -ge 128 -and $lum -le ($barLuma - 60)) -or
+                     ($barLuma -lt 128 -and $lum -ge ($barLuma + 60)))) {
+                    $inkHit = $k; break
+                }
+            }
+
+            if (-not $inkHit -and $inkTry -lt 5) {
+                Start-Sleep -Seconds 3
+                $shot.Bitmap.Dispose()
+                $shot = Get-OverlaySample $r
+                $colors = $shot.Hist
+            }
+        }
+        Check "adaptive palette paints legible ink" ([bool]$inkHit) `
+            ("bar luma=$([int]$barLuma) ink=$inkHit dominant=$barKey after $inkTry sample(s)")
+    } elseif ($configured) {
         # Antialiasing shifts the exact value, so allow a small tolerance.
         $target = $configured.Split(',') | ForEach-Object { [int]$_ }
         $hl = $colors.Keys | Where-Object {
@@ -145,8 +197,8 @@ if ($script:ov) {
         Check "configured highlight colour present" $true "no settings file; skipped"
     }
 
-    $bmp.Save("$root\artifacts\acceptance-overlay.png", [System.Drawing.Imaging.ImageFormat]::Png)
-    $bmp.Dispose()
+    $shot.Bitmap.Save("$root\artifacts\acceptance-overlay.png", [System.Drawing.Imaging.ImageFormat]::Png)
+    $shot.Bitmap.Dispose()
 }
 
 Write-Host ""

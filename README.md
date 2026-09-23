@@ -11,7 +11,7 @@
 
 ## 效果
 
-任务栏中的实际效果 —— 左侧为播放控制与歌曲进度，右侧为逐字高亮的歌词：
+任务栏中的实际效果 —— 鼠标移入时左侧淡入唱片封面、歌名、歌手与播放控制，歌词让位到右侧；鼠标移开后歌词缓动回到整条正中：
 
 ![任务栏歌词](docs/overlay.png)
 
@@ -83,12 +83,14 @@ powershell -ExecutionPolicy Bypass -File scripts\run-app.ps1
 
 | 分页 | 可调项 |
 | --- | --- |
-| **外观** | 字体、字重（Light/Normal/SemiBold/Bold）、原文字号、译文字号、**字间距**；已唱高亮色、未唱文字色、下一行预览色、背景板色（取色器 + 24 色色板，也支持手输 `#RRGGBB` / `#AARRGGBB`）；背景板开关与圆角；逐字高亮、翻译行、下一行预览开关 |
+| **外观** | 字体、字重（Light/Normal/SemiBold/Bold）、原文字号、译文字号、**字间距**；已唱高亮色、未唱文字色、下一行预览色、背景板色（取色器 + 24 色色板，也支持手输 `#RRGGBB` / `#AARRGGBB`）；**自动适配任务栏配色**、背景板开关与圆角；逐字高亮、翻译行、下一行预览、**换行淡入**开关 |
 | **位置与显示** | **宽度、高度（0=自动）**、**垂直对齐、水平偏移、垂直偏移**、**整体不透明度 15%~100%**；四方向微调 + 恢复默认位置；锁定位置（点击穿透）、是否显示、暂停时是否显示、无歌词时是否隐藏；歌词偏移（−5000…+5000 毫秒） |
 | **歌词来源** | QQ音乐 / 网易云音乐 / LRCLIB 启用开关；「重新匹配当前歌曲」「清空歌词缓存」；「查看当前歌词匹配详情」诊断弹窗 |
-| **播放控制** | 上一首 / 暂停播放 / 下一首 三个按钮；四个**全局快捷键**（可自定义，留空即关闭） |
+| **播放控制** | 上一首 / 暂停播放 / 下一首 三个按钮、**鼠标移上去才显形**；四个**全局快捷键**（可自定义，留空即关闭） |
 
 颜色会规范化为 `#AARRGGBB` 后写入配置。
+
+字体下拉框第一项是 **MiSans（内置·汽水同款）**——它读取 `src\TaskbarLyrics.App\Fonts\MiSans-subset.ttf`，选中即用，不需要额外装字体；解析不到时会自动退回系统字体，不会渲染成怪字形。**仓库不附带任何字体文件**（字体有自己的授权，不由本项目再分发，见 `src\TaskbarLyrics.App\Fonts\README.md`），把自备的 TTF 放到该路径后重新构建即可启用；文件缺席时构建照常，只是这一项退化为系统字体。
 
 > 调字体和颜色时请直接看任务栏——那才是最真实的预览。
 
@@ -263,21 +265,29 @@ $env:TBL_COMPOSITE = 'colorkey'  # 强制色键方案
 | --- | --- | --- |
 | `Width` | 悬浮窗宽度（DIP） | `460` |
 | `OffsetX` / `OffsetY` | 相对默认锚点的偏移，拖动即改 | `0` |
-| `FontFamily` | 字体 | `Microsoft YaHei UI` |
-| `OriginalFontSize` / `TranslationFontSize` | 原文/译文字号 | `12.5` / `11` |
-| `HighlightColor` | 已唱高亮色 | `#FF3ABEFF` |
-| `BaseColor` | 未唱文字色 | `#FFE8E8E8` |
-| `ContextColor` | 下一行颜色 | `#8CFFFFFF` |
+| `FontFamily` | 字体（选「MiSans（内置·汽水同款）」时读 `Fonts\MiSans-subset.ttf`，该文件需自备） | `Microsoft YaHei UI` |
+| `OriginalFontSize` / `TranslationFontSize` | 原文/译文字号 | `11` / `10` |
+| `HighlightColor` | 已唱高亮色（`AutoAdaptColors` 关闭时生效） | `#FF3ABEFF` |
+| `BaseColor` | 未唱文字色（同上） | `#FFE8E8E8` |
+| `ContextColor` | 下一行颜色（同上） | `#8CFFFFFF` |
+| `AutoAdaptColors` | 按任务栏明暗自动决定字色，无需背景板 | `true` |
 | `BackgroundColor` | 背景板颜色（含透明度） | `#B3121212` |
+| `ShowBackground` | 显示背景板 | `false` |
 | `ShowTranslation` | 显示翻译行 | `true` |
 | `ShowContextLines` | 显示下一行预览 | `true` |
+| `LineTransition` | 换行时淡入 | `true` |
 | `EnableWordHighlight` | 逐字高亮 | `true` |
+| `HoverRevealControls` | 鼠标移上去才显示控制按钮 | `true` |
 | `GlobalOffsetMs` | 全局歌词偏移（毫秒，正数延后） | `0` |
 | `Locked` | 锁定位置（点击穿透） | `true` |
 | `EnableQqMusic` / `EnableNetEase` / `EnableLrclib` | 启用歌词源 | 全开 |
 
 > 注：`BackgroundColor` 同时是背景板填充色与 `colorkey` 模式下的面板色，
 > 修改后重新匹配/重启生效。
+>
+> 注：`AutoAdaptColors` 打开时（默认），歌词字色由任务栏取样决定——浅色任务栏配深色字、
+> 深色任务栏配浅色字，此时上面三个颜色不参与绘制；关掉它才回到手工配色。
+> 默认不画背景板，正是因为自适应字色已经保证了可读性。
 
 ---
 
@@ -288,7 +298,7 @@ $env:TBL_COMPOSITE = 'colorkey'  # 强制色键方案
 ```powershell
 $exe = "src\TaskbarLyrics.Cli\bin\Release\net8.0-windows10.0.19041.0\tblc.exe"
 
-& $exe selftest   # 22 项解析/匹配/外推单元校验
+& $exe selftest   # 101 项解析/匹配/外推单元校验
 & $exe now        # 打印当前曲目、各歌词源命中情况、当前歌词窗口
 & $exe watch      # 持续滚动当前歌词（类似任务栏效果）
 ```

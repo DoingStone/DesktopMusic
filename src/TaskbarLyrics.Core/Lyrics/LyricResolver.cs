@@ -13,6 +13,13 @@ public sealed record LyricResolution(
 {
     public bool Found => !Document.IsEmpty;
 
+    /// <summary>
+    /// Set when this came from the second, duration-blind pass - that is, no candidate
+    /// matched the length the player reported. The lyrics are usable, but the edition is
+    /// unverified, so the timing may not fit the recording being heard.
+    /// </summary>
+    public bool EditionUnverified { get; init; }
+
     public static LyricResolution NotFound(IReadOnlyList<ProviderTrace> traces) =>
         new(LyricDocument.Empty, LyricSourceKind.None, null, 0, traces);
 }
@@ -38,6 +45,12 @@ public sealed class LyricResolver
 
     /// <summary>Below this score a candidate is never accepted.</summary>
     public const double MinimumScore = 78;
+
+    /// <summary>
+    /// How many further candidates to fetch while hunting for word timing once a usable
+    /// line-level match is already in hand.
+    /// </summary>
+    private const int FallbackSearchLimit = 4;
 
     private readonly IReadOnlyList<ILyricProvider> _providers;
     private readonly ConcurrentDictionary<string, LyricResolution> _cache = new(StringComparer.Ordinal);
@@ -83,13 +96,36 @@ public sealed class LyricResolver
         var tasks = _providers.Select(p => SearchOneAsync(p, track, traces, ct)).ToArray();
         var scored = (await Task.WhenAll(tasks).ConfigureAwait(false))
             .SelectMany(x => x)
+
+            // The tie-break belongs here, where the providers are merged. Applying it inside
+            // SearchOneAsync only ordered one provider's own candidates, and this re-sort by
+            // score alone then discarded it - so equal scores fell back to provider
+            // registration order and the service that was actually playing lost to whichever
+            // happened to be registered first.
             .OrderByDescending(x => x.Score)
+            .ThenByDescending(x => LyricMatcher.MatchesPlayingService(
+                track.SourceAppId, x.Candidate.Source))
             .ToArray();
 
         // Try candidates in descending confidence until one yields real lyrics.
+        //
+        // Word timing outranks score. A source that timed every word tracks the singing; a
+        // line-level source can only estimate where inside a line the voice is, and no
+        // amount of confidence in its metadata changes that. Returning the first non-empty
+        // result let a line-level match at 100 beat a word-timed match at 96, silently
+        // discarding the better highlight - so a line-level result is held back as a
+        // fallback while the remaining candidates are tried.
+        Scored? fallback = null;
+        LyricDocument? fallbackDoc = null;
+        int fetchedSinceFallback = 0;
+
         foreach (var best in scored)
         {
             if (best.Score < MinimumScore) break;
+
+            // Bounded: with no word-timed source in the running, fetching every remaining
+            // candidate would only add latency before reaching the same answer.
+            if (fallback is not null && ++fetchedSinceFallback > FallbackSearchLimit) break;
 
             var provider = _providers.FirstOrDefault(p => p.Kind == best.Candidate.Source);
             if (provider is null) continue;
@@ -97,11 +133,56 @@ public sealed class LyricResolver
             var doc = await provider.FetchAsync(best.Candidate, ct).ConfigureAwait(false);
             if (doc.IsEmpty) continue;
 
-            var resolution = new LyricResolution(
-                doc, best.Candidate.Source, best.Candidate, best.Score, traces.ToArray());
+            if (doc.HasRealWordTiming)
+            {
+                var wordTimed = new LyricResolution(
+                    doc, best.Candidate.Source, best.Candidate, best.Score, traces.ToArray());
+                _cache[key] = wordTimed;
+                return wordTimed;
+            }
 
-            _cache[key] = resolution;
-            return resolution;
+            fallback ??= best;
+            fallbackDoc ??= doc;
+        }
+
+        if (fallback is { } winner && fallbackDoc is not null)
+        {
+            var lineLevel = new LyricResolution(
+                fallbackDoc, winner.Candidate.Source, winner.Candidate, winner.Score, traces.ToArray());
+            _cache[key] = lineLevel;
+            return lineLevel;
+        }
+
+        // Second pass, with the different-recording check disabled.
+        //
+        // That check depends on both sides reporting a comparable length, and they do not
+        // always: a streamed trial clip, a player whose own figure differs from its
+        // catalogue, or a stale provider entry makes every candidate look like a different
+        // recording. Refusing all of them leaves no lyrics at all, which is worse than
+        // lyrics whose timing is merely suspect - so rather than show nothing, fall back to
+        // the best match on title and artist alone.
+        var relaxed = scored
+            .Select(s => new Scored(s.Candidate, LyricMatcher.Score(track, s.Candidate, ignoreDuration: true)))
+            .Where(s => s.Score >= MinimumScore)
+            .OrderByDescending(s => s.Score)
+            .ThenByDescending(s => LyricMatcher.MatchesPlayingService(track.SourceAppId, s.Candidate.Source))
+            .ToArray();
+
+        foreach (var best in relaxed)
+        {
+            var provider = _providers.FirstOrDefault(p => p.Kind == best.Candidate.Source);
+            if (provider is null) continue;
+
+            var doc = await provider.FetchAsync(best.Candidate, ct).ConfigureAwait(false);
+            if (doc.IsEmpty) continue;
+
+            var relaxedResolution = new LyricResolution(
+                doc, best.Candidate.Source, best.Candidate, best.Score, traces.ToArray())
+            {
+                EditionUnverified = true,
+            };
+            _cache[key] = relaxedResolution;
+            return relaxedResolution;
         }
 
         var notFound = LyricResolution.NotFound(traces.ToArray());
@@ -128,6 +209,12 @@ public sealed class LyricResolver
             var scored = candidates
                 .Select(c => new Scored(c, LyricMatcher.Score(track, c)))
                 .OrderByDescending(s => s.Score)
+
+                // Score alone frequently ties: two services both hold the same recording and
+                // both reach the clamp. Prefer the one that is actually playing, whose own
+                // database is the likeliest to carry the edition being heard.
+                .ThenByDescending(s => LyricMatcher.MatchesPlayingService(
+                    track.SourceAppId, s.Candidate.Source))
                 .ToArray();
 
             var top = scored[0];

@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using TaskbarLyrics.App.Configuration;
@@ -45,6 +46,17 @@ public partial class OverlayWindow : Window
     private long _lastTopmostCheckMs;
 
     /// <summary>
+    /// A single step of alpha painted across the strip (1/255 of black).
+    /// <para>
+    /// Invisible to the eye, but not to Windows: a layered window is hit-tested by its
+    /// own alpha, so pixels at alpha 0 are transparent to the mouse as well as the eye.
+    /// Without this floor an empty strip never receives a hover, a drag, or a click on
+    /// a button whose own chrome is transparent until it is hovered.
+    /// </para>
+    /// </summary>
+    private static readonly Brush HitTestFloor = Frozen(Color.FromArgb(1, 0, 0, 0));
+
+    /// <summary>
     /// True while the overlay is parented to the taskbar. In that state Z-order is
     /// the taskbar's concern, so the re-assert guard is unnecessary.
     /// </summary>
@@ -66,7 +78,61 @@ public partial class OverlayWindow : Window
     private double _dragStartOffsetX;
     private bool _positioned;
 
+    /// <summary>True when the transport controls stay hidden until the strip is hovered.</summary>
+    private bool _hoverReveal;
+
+    /// <summary>True while the pointer is anywhere over the strip.</summary>
+    private bool _hovered;
+
+    /// <summary>
+    /// Colour the transport glyphs were last tinted with, so the drag pill can be
+    /// brightened for the duration of a drag without re-reading the taskbar.
+    /// </summary>
+    private Color _transportInk = Colors.White;
+
+    /// <summary>
+    /// The two play/pause glyphs, resolved once. Swapping between two resources keeps the
+    /// button's own layout untouched — the two are authored in the same view box, so the
+    /// swap cannot shift or resize what is already on screen.
+    /// </summary>
+    private readonly Geometry _playIcon;
+    private readonly Geometry _pauseIcon;
+
+    /// <summary>
+    /// Lyric text currently on screen. Kept so a line change — and only a line
+    /// change — can be faded in; the render tick rewrites the same text ~12 times a
+    /// second and must not restart the animation each time.
+    /// </summary>
+    private string _renderedText = string.Empty;
+
+    /// <summary>Last line index and width written to the diag log, so it is logged on change.</summary>
+    private int _diagIndex = int.MinValue;
+    private double _diagWidth = double.NaN;
+
+    /// <summary>Last lyric inset written to the diag log; see <see cref="UpdateLyricShift"/>.</summary>
+    private double _diagInset = double.NaN;
+
+    /// <summary>
+    /// Album art for the hover cluster, and the brush that paints it. The brush is kept as
+    /// a field rather than rebuilt per track, so a song change costs one image decode and
+    /// nothing else.
+    /// </summary>
+    private ImageSource? _coverArt;
+
+    private readonly ImageBrush _coverBrush = new()
+    {
+        Stretch = Stretch.UniformToFill,
+        AlignmentX = AlignmentX.Center,
+        AlignmentY = AlignmentY.Center,
+    };
+
     private readonly DispatcherTimer _repositionTimer;
+
+    /// <summary>Polls the pointer for the hover reveal; runs only while it is enabled.</summary>
+    private readonly DispatcherTimer _pointerTimer;
+
+    /// <summary>How often the pointer is polled. Well under the fade duration.</summary>
+    private const int PointerPollMs = 100;
 
     public OverlayWindow(AppSettings settings, CompositingMode compositing)
     {
@@ -83,6 +149,9 @@ public partial class OverlayWindow : Window
         }
 
         InitializeComponent();
+
+        _playIcon = (Geometry)FindResource("IconPlay");
+        _pauseIcon = (Geometry)FindResource("IconPause");
 
         // The overlay is chromeless, but the icon still matters for the Alt+Tab
         // list and window enumeration.
@@ -102,6 +171,29 @@ public partial class OverlayWindow : Window
         MouseLeftButtonDown += OnMouseLeftButtonDown;
         MouseMove += OnMouseMove;
         MouseLeftButtonUp += OnMouseLeftButtonUp;
+
+        // Hover reveal for the transport controls, polled rather than driven by
+        // MouseEnter/MouseLeave. Re-asserting our own Z-order under a stationary
+        // pointer makes Windows cancel mouse tracking, so WPF reports a MouseLeave
+        // that never happened and then sends nothing until the pointer physically
+        // moves again — measured as the controls appearing and disappearing ~170 ms
+        // later, with no way to bring them back. The cursor position is authoritative
+        // and costs one GetCursorPos per tick.
+        _pointerTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(PointerPollMs),
+        };
+        _pointerTimer.Tick += (_, _) => PollPointer();
+
+        // The cluster decides how far the words have to travel, and its width is only known
+        // once it has been measured — then again whenever the title, the artist, the cover or
+        // the readout changes it. A size change is the one signal all of those share.
+        LeftCluster.SizeChanged += (_, _) => UpdateLyricShift(animate: false);
+
+        // The clip that keeps the words out from under the cluster is built from the lines'
+        // own width, so it has to be rebuilt whenever the strip is resized.
+        CurrentLine.SizeChanged += (_, _) => UpdateLyricShift(animate: false);
+        NextLine.SizeChanged += (_, _) => UpdateLyricShift(animate: false);
 
         // Release the Win32 hook and the guard thread with the window, so neither
         // keeps running (or keeps a delegate alive) after the overlay is gone.
@@ -151,7 +243,7 @@ public partial class OverlayWindow : Window
         PlaceOverWindow();
 
         // Needs the window placed first: it samples the taskbar colour beside the strip.
-        UpdateTransportContrast();
+        RefreshBackdropContrast();
 
         // Re-assert from a dedicated thread. Marshalling through the dispatcher put the
         // recovery behind whatever WPF was rendering, measured as the lyrics staying
@@ -357,6 +449,15 @@ public partial class OverlayWindow : Window
     private TimeSpan _lastDuration;
 
     /// <summary>
+    /// State last pushed to the progress panel. SetProgress runs on every render tick, so
+    /// it compares against these instead of rebuilding the readout and re-assigning the
+    /// fill width (which invalidates layout for the strip) 60 times a second.
+    /// </summary>
+    private int _shownSeconds = -1;
+    private int _shownDurationSeconds = -1;
+    private double _shownFillWidth = double.NaN;
+
+    /// <summary>
     /// Update the song progress bar and time readout shown under the transport
     /// buttons.
     /// </summary>
@@ -368,22 +469,58 @@ public partial class OverlayWindow : Window
         if (duration <= TimeSpan.Zero)
         {
             // Nothing meaningful to show until the player reports a duration.
-            ProgressText.Text = "--:-- / --:--";
-            ProgressFill.Width = 0;
+            if (_shownSeconds != -1 || _shownDurationSeconds != -1)
+            {
+                _shownSeconds = -1;
+                _shownDurationSeconds = -1;
+                ProgressText.Text = "--:-- / --:--";
+            }
+
+            SetFillWidth(0);
             return;
         }
 
         if (position < TimeSpan.Zero) position = TimeSpan.Zero;
         if (position > duration) position = duration;
 
-        ProgressText.Text = $"{Format(position)} / {Format(duration)}";
+        // The readout has one-second resolution, so the string is only rebuilt when the
+        // displayed second actually changes.
+        var seconds = (int)position.TotalSeconds;
+        var durationSeconds = (int)duration.TotalSeconds;
+        if (seconds != _shownSeconds || durationSeconds != _shownDurationSeconds)
+        {
+            _shownSeconds = seconds;
+            _shownDurationSeconds = durationSeconds;
+            ProgressText.Text = $"{Format(position)} / {Format(duration)}";
+        }
 
         // Width comes from the track's measured width, so it stays correct across
         // resizes and DPI changes with no binding machinery.
         var trackWidth = ProgressTrack.ActualWidth;
-        ProgressFill.Width = trackWidth > 0
+        SetFillWidth(trackWidth > 0
             ? Math.Clamp(trackWidth * (position.TotalSeconds / duration.TotalSeconds), 0, trackWidth)
-            : 0;
+            : 0);
+    }
+
+    /// <summary>
+    /// Assign the fill width only when it moves by at least half a DIP (or resets).
+    /// Every assignment invalidates the strip's layout, and during playback the fill
+    /// advances by a fraction of a pixel per frame.
+    /// </summary>
+    private void SetFillWidth(double width)
+    {
+        if (width == _shownFillWidth)
+        {
+            return;
+        }
+
+        if (width != 0 && Math.Abs(width - _shownFillWidth) < 0.5)
+        {
+            return;
+        }
+
+        _shownFillWidth = width;
+        ProgressFill.Width = width;
     }
 
     /// <summary>m:ss for tracks under an hour, h:mm:ss above it.</summary>
@@ -402,71 +539,158 @@ public partial class OverlayWindow : Window
     }
 
     /// <summary>
-    /// Keep the transport glyphs and progress readout legible whatever is behind them.
+    /// Colour the strip for the surface it is sitting on: the transport glyphs and
+    /// the lyric palette in one pass.
     /// <para>
     /// With the readability plate disabled the strip is drawn straight onto the taskbar,
-    /// where the fixed near-white glyphs vanish against a light bar. The taskbar's own
+    /// where a fixed near-white lyric vanishes against a light bar. The taskbar's own
     /// colour is sampled just outside the strip — those points are not covered by this
-    /// window, so they report the real backdrop — and the glyphs flip to dark or light
-    /// accordingly, always with an opposite-coloured halo so they also survive a
-    /// gradient or a wallpaper edge.
+    /// window, so they report the real backdrop — and both the glyphs and the lyrics
+    /// flip to match it.
     /// </para>
     /// </summary>
-    private void UpdateTransportContrast()
+    private void RefreshBackdropContrast()
     {
-        // With the plate on, the backdrop is our own dark fill, so the light glyphs are
-        // already right and sampling the taskbar would give the wrong answer.
+        // With the plate on, the backdrop is our own dark fill, so light ink is already
+        // right and sampling the taskbar would answer a question we are not asking.
         if (_settings.ShowBackground)
         {
-            ApplyTransportColors(Colors.White, Colors.Black);
+            ApplyTransportPalette(lightBar: false, halo: false);
+            ApplyLyricPalette(adaptive: false, lightBar: false, sampled: false);
             return;
         }
 
         double? luminance = SampleBackdropLuminance();
+        bool lightBar = luminance is > 0.55;
 
-        if (luminance is > 0.55)
+        // No reading means the ink colour is a guess, and the outline is what keeps a wrong
+        // guess readable. With a reading it is not needed — the reference has no such effect.
+        ApplyTransportPalette(lightBar, halo: !luminance.HasValue);
+        ApplyLyricPalette(_settings.AutoAdaptColors, lightBar, luminance.HasValue);
+    }
+
+    /// <summary>
+    /// Pick the lyric colours for a backdrop of the given brightness.
+    /// <para>
+    /// The adaptive palette is the reference implementation's: black text over a light
+    /// taskbar and white over a dark one, each in two alphas — 55% for the unsung part
+    /// and 90% for the sung part — so the sweep is a change of intensity in the bar's own
+    /// colour rather than a second colour laid on top of it. With no reading to act on
+    /// (window not positioned yet, or the sample fell outside the bar) the configured
+    /// palette is used, so nothing is ever coloured from a guess.
+    /// </para>
+    /// </summary>
+    private void ApplyLyricPalette(bool adaptive, bool lightBar, bool sampled)
+    {
+        var auto = adaptive && sampled;
+
+        Brush baseBrush;
+        Brush highlightBrush;
+        Brush contextBrush;
+
+        if (auto)
         {
-            ApplyTransportColors(Color.FromRgb(0x14, 0x14, 0x14), Colors.White);
+            baseBrush = Frozen(lightBar
+                ? Color.FromArgb(0x8C, 0x00, 0x00, 0x00)
+                : Color.FromArgb(0x8C, 0xFF, 0xFF, 0xFF));
+            highlightBrush = Frozen(lightBar
+                ? Color.FromArgb(0xE6, 0x00, 0x00, 0x00)
+                : Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF));
+            contextBrush = Frozen(lightBar
+                ? Color.FromArgb(0x59, 0x00, 0x00, 0x00)
+                : Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF));
         }
         else
         {
-            // Dark backdrop, or no reading at all: light glyphs, which the halo keeps
-            // readable either way.
-            ApplyTransportColors(Colors.White, Colors.Black);
+            baseBrush = ParseBrush(_settings.BaseColor, Brushes.WhiteSmoke);
+            highlightBrush = ParseBrush(_settings.HighlightColor, Brushes.DeepSkyBlue);
+            contextBrush = ParseBrush(_settings.ContextColor, Brushes.LightGray);
         }
+
+        foreach (var line in new[] { CurrentLine, NextLine })
+        {
+            line.BaseColor = baseBrush;
+            line.HighlightColor = highlightBrush;
+            line.ContextColor = contextBrush;
+
+            // The offset copy only earns its place when the text colour was chosen by
+            // hand and may end up light-on-light; a palette picked for contrast does not
+            // need an outline on top of it.
+            line.ShadowEnabled = !auto;
+        }
+
+        Diag.Log($"[overlay] palette auto={auto} lightBar={lightBar} " +
+                 $"base={Describe(baseBrush)} hl={Describe(highlightBrush)}");
     }
 
-    private void ApplyTransportColors(Color glyph, Color halo)
+    private static Brush Frozen(Color color)
     {
-        var brush = new SolidColorBrush(glyph);
+        var brush = new SolidColorBrush(color);
         brush.Freeze();
+        return brush;
+    }
+
+    private static Color WithAlpha(Color color, byte alpha) =>
+        Color.FromArgb(alpha, color.R, color.G, color.B);
+
+    /// <summary>
+    /// Colour the transport controls the way the reference colours its own.
+    /// <para>
+    /// The glyph is the surface's own colour at 70%, going to 100% under the pointer, and
+    /// the play/pause pill is that same colour at 7%, going to 12% under the pointer. The
+    /// contrast comes from picking a side — black over a light taskbar, white over a dark
+    /// one — rather than from an outline, which is what makes the reference's controls read
+    /// as part of the bar instead of as a widget stuck onto it.
+    /// </para>
+    /// </summary>
+    private void ApplyTransportPalette(bool lightBar, bool halo)
+    {
+        var ink = lightBar ? Colors.Black : Colors.White;
+        var outline = lightBar ? Colors.White : Colors.Black;
+
+        _transportInk = ink;
+        var haloColor = halo ? WithAlpha(outline, 0x8C) : (Color?)null;
 
         foreach (var button in new[] { PrevButton, PlayPauseButton, NextButton })
         {
-            button.Foreground = brush;
-
-            // ShadowDepth 0 with a small blur is a halo rather than a shadow: it
-            // outlines the glyph instead of offsetting it.
-            button.Effect = new DropShadowEffect
-            {
-                Color = halo,
-                ShadowDepth = 0,
-                BlurRadius = 3,
-                Opacity = 0.9,
-            };
+            button.IconColor = WithAlpha(ink, 0xB3);
+            button.IconHoverColor = WithAlpha(ink, 0xFF);
+            button.PillColor = WithAlpha(ink, 0x12);
+            button.PillHoverColor = WithAlpha(ink, 0x1F);
+            button.HaloColor = haloColor;
         }
 
-        var textBrush = new SolidColorBrush(Color.FromArgb(0xE6, glyph.R, glyph.G, glyph.B));
-        textBrush.Freeze();
-        ProgressText.Foreground = textBrush;
-        ProgressText.Effect = new DropShadowEffect
-        {
-            Color = halo,
-            ShadowDepth = 0,
-            BlurRadius = 3,
-            Opacity = 0.9,
-        };
+        // The groove is tinted from the same colour as the glyphs: the hard-coded white it
+        // started with disappears on a light taskbar, exactly where the ink just went black.
+        ProgressTrack.Background = Frozen(WithAlpha(ink, 0x33));
+
+        ProgressText.Foreground = Frozen(WithAlpha(ink, 0xE6));
+        ProgressText.Effect = halo ? HaloEffect(outline) : null;
+
+        // The track information rides the same side as the glyphs, one step quieter, so the
+        // title reads first and the artist stays a caption under it. Both get the same halo
+        // as the readout: they sit directly on the taskbar whenever the strip has no backing
+        // of its own, which is exactly the case that halo exists for.
+        SongTitle.Foreground = Frozen(WithAlpha(ink, 0xB3));
+        SongTitle.Effect = halo ? HaloEffect(outline) : null;
+        SongArtist.Foreground = Frozen(WithAlpha(ink, 0x80));
+        SongArtist.Effect = halo ? HaloEffect(outline) : null;
+        CoverPlaceholder.Foreground = Frozen(WithAlpha(ink, 0x66));
+
+        ApplyCoverBackground();
+
+        SetDragHandleDragging(_dragging);
+
+        Diag.Log($"[overlay] transport lightBar={lightBar} halo={halo} ink={ink}");
     }
+
+    /// <summary>
+    /// Brighten the drag pill while it is actually being dragged — the reference's own
+    /// affordance goes from 12% to 50% for the duration of the drag.
+    /// </summary>
+    private void SetDragHandleDragging(bool dragging) =>
+        DragHandle.Background = Frozen(WithAlpha(_transportInk, dragging ? (byte)0x80 : (byte)0x1F));
+
 
     /// <summary>
     /// Average brightness (0..1) of the taskbar immediately left and right of the strip,
@@ -609,7 +833,7 @@ public partial class OverlayWindow : Window
         TrySetTaskbarAsOwner();
 
         // Slow re-evaluation so a wallpaper or taskbar colour change is picked up.
-        UpdateTransportContrast();
+        RefreshBackdropContrast();
 
         // The taskbar re-asserts itself as topmost whenever it is clicked or
         // activated, which silently pushes this window down inside the topmost
@@ -647,21 +871,21 @@ public partial class OverlayWindow : Window
         Diag.Log($"[overlay] ApplySettingsToVisuals showBg={_settings.ShowBackground} " +
                  $"bg={_settings.BackgroundColor} base={_settings.BaseColor} " +
                  $"hl={_settings.HighlightColor} ctx={_settings.ContextColor} " +
-                 $"font={_settings.FontFamily}/{_settings.OriginalFontSize} " +
+                 $"font={_settings.FontFamily} resolved={BundledFonts.Resolve(_settings.FontFamily)}/{_settings.OriginalFontSize} " +
                  $"showTrans={_settings.ShowTranslation} locked={_settings.Locked}");
 
         foreach (var line in new[] { CurrentLine, NextLine })
         {
-            line.FontFamilyName = _settings.FontFamily;
+            line.FontFamilyName = BundledFonts.Resolve(_settings.FontFamily);
             line.FontSizeValue = _settings.OriginalFontSize;
             line.TranslationFontSizeValue = _settings.TranslationFontSize;
             line.FontWeightName = _settings.FontWeight;
             line.LetterSpacing = _settings.LetterSpacing;
-            line.HighlightColor = ParseBrush(_settings.HighlightColor, Brushes.DeepSkyBlue);
-            line.BaseColor = ParseBrush(_settings.BaseColor, Brushes.WhiteSmoke);
-            line.ContextColor = ParseBrush(_settings.ContextColor, Brushes.LightGray);
             line.WordHighlightEnabled = _settings.EnableWordHighlight;
         }
+
+        // Colours are not read here: they depend on the taskbar reading taken at the
+        // bottom of this method (see RefreshBackdropContrast).
 
         // Transport buttons are optional; hidden buttons must not capture clicks,
         // otherwise the strip would swallow taskbar input for no visible reason.
@@ -671,6 +895,16 @@ public partial class OverlayWindow : Window
 
         // Progress sits under the buttons and is independently toggleable.
         ProgressSection.Visibility = _settings.ShowSongProgress
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        // Track information is switchable piece by piece, so the panel itself only goes away
+        // when all three of its parts are off — otherwise the cover would be dragged off the
+        // strip by turning off the artist.
+        CoverBox.Visibility = _settings.ShowCoverArt ? Visibility.Visible : Visibility.Collapsed;
+        SongTitle.Visibility = _settings.ShowSongTitle ? Visibility.Visible : Visibility.Collapsed;
+        SongArtist.Visibility = _settings.ShowSongArtist ? Visibility.Visible : Visibility.Collapsed;
+        InfoPanel.Visibility = HasTrackInfo
             ? Visibility.Visible
             : Visibility.Collapsed;
 
@@ -695,9 +929,11 @@ public partial class OverlayWindow : Window
         }
         else
         {
+            // No backdrop wanted: paint only the hit-test floor, so the taskbar shows
+            // through untouched while the strip stays reachable (see HitTestFloor).
             Backdrop.Background = _settings.ShowBackground
                 ? ParseBrush(_settings.BackgroundColor, new SolidColorBrush(Color.FromArgb(0x66, 0, 0, 0)))
-                : Brushes.Transparent;
+                : HitTestFloor;
         }
 
         Backdrop.CornerRadius = new CornerRadius(_settings.BackgroundCornerRadius);
@@ -705,6 +941,303 @@ public partial class OverlayWindow : Window
         NextLine.Visibility = _settings.ShowContextLines ? Visibility.Visible : Visibility.Collapsed;
 
         Width = Math.Max(MinOverlayWidth, _settings.Width);
+
+        ApplyControlRevealMode();
+
+        // Last: it samples the taskbar and therefore needs the window positioned, and
+        // it is the only place the lyric colours come from.
+        RefreshBackdropContrast();
+    }
+
+    /// <summary>
+    /// Whether the hover cluster carries any track information at all.
+    /// <para>
+    /// Both the reveal decision and the layout depend on it: an all-off cluster must not
+    /// hold a column open, and a cluster with nothing but a cover should still be worth
+    /// revealing on hover.
+    /// </para>
+    /// </summary>
+    private bool HasTrackInfo =>
+        _settings.ShowCoverArt || _settings.ShowSongTitle || _settings.ShowSongArtist;
+
+    /// <summary>
+    /// Decide whether the transport controls are always visible or revealed on hover,
+    /// and put them into that state immediately.
+    /// </summary>
+    private void ApplyControlRevealMode()
+    {
+        // Hover needs pointer positions, which only mean something on an interactive
+        // (unlocked) strip: while the overlay is click-through the controls cannot be
+        // clicked, so hiding them would make them unreachable.
+        //
+        // Track information rides the same reveal: it has no clicks of its own, and while
+        // it is pinned open the words have to stay out of its way, which is exactly the
+        // layout the user asked not to have.
+        _hoverReveal = _settings.HoverRevealControls
+                       && _settings.Interactive
+                       && (_settings.ShowTransportControls || HasTrackInfo);
+
+        // The drag pill is the strip's own affordance rather than part of the transport
+        // set, so it survives the controls being turned off — but only while the strip can
+        // actually be dragged, otherwise it would advertise something that does nothing.
+        DragHandle.Visibility = _settings.Interactive ? Visibility.Visible : Visibility.Collapsed;
+
+        if (!_hoverReveal)
+        {
+            _pointerTimer.Stop();
+            TransportPanel.BeginAnimation(OpacityProperty, null);
+            TransportPanel.Opacity = 1;
+            InfoPanel.BeginAnimation(OpacityProperty, null);
+            InfoPanel.Opacity = 1;
+            DragHandle.BeginAnimation(OpacityProperty, null);
+            DragHandle.Opacity = 1;
+
+            // Pinned open means the cluster is never out of the way, so the words belong in
+            // the space that is left rather than over the middle of the band.
+            UpdateLyricShift(animate: false);
+
+            Diag.Log($"[overlay] controls always visible (hoverReveal=False interactive={_settings.Interactive} show={_settings.ShowTransportControls} info={HasTrackInfo})");
+            return;
+        }
+
+        Diag.Log($"[overlay] controls hover-revealed (shown={_hovered})");
+        _pointerTimer.Start();
+        SetControlsShown(_hovered);
+    }
+
+    /// <summary>
+    /// Reveal or hide the controls according to where the pointer actually is.
+    /// </summary>
+    private void PollPointer()
+    {
+        if (!_hoverReveal || !IsVisible) return;
+
+        var over = IsCursorOverStrip();
+        if (over == _hovered) return;
+
+        _hovered = over;
+        SetControlsShown(over);
+    }
+
+    /// <summary>Is the pointer inside the strip's screen rectangle?</summary>
+    private bool IsCursorOverStrip()
+    {
+        if (!NativeMethods.GetCursorPos(out var pt)) return false;
+
+        // Win32 hands back physical pixels while Left/Top are DIP, so the two are only
+        // comparable through the taskbar's scale (the same factor the placement uses).
+        var scale = _taskbar?.Scale ?? 1.0;
+        if (scale <= 0) scale = 1.0;
+
+        // A few pixels of slack, so a pointer resting exactly on the edge does not
+        // make the controls flicker.
+        const double slack = 4;
+
+        var left = (Left * scale) - slack;
+        var top = (Top * scale) - slack;
+        var right = ((Left + ActualWidth) * scale) + slack;
+        var bottom = ((Top + ActualHeight) * scale) + slack;
+
+        return pt.X >= left && pt.X <= right && pt.Y >= top && pt.Y <= bottom;
+    }
+
+    /// <summary>
+    /// Fade the hover cluster in or out, and carry the words to the place they belong in
+    /// each state.
+    /// <para>
+    /// The cluster's own layout never changes on hover — it keeps its column at all times,
+    /// because opacity does not affect layout — so the fade re-measures nothing. What does
+    /// move is the words: while the cluster is on screen they sit in the space it leaves,
+    /// and while it is gone they are carried back over the middle of the band.
+    /// </para>
+    /// </summary>
+    private void SetControlsShown(bool shown)
+    {
+        if (!_hoverReveal) return;
+
+        Diag.Log($"[overlay] controls {(shown ? "revealed" : "hidden")}");
+
+        var target = shown ? 1.0 : 0.0;
+
+        // One duration for the whole gesture, so the cluster, the words and the drag pill
+        // read as a single movement rather than as three elements arriving separately.
+        var fadeMs = shown ? 120 : 180;
+
+        var panelFade = FadeTo(target, fadeMs);
+
+        if (shown)
+        {
+            TransportPanel.IsHitTestVisible = true;
+        }
+        else
+        {
+            // Invisible buttons must stop taking clicks as soon as they are gone,
+            // otherwise a click on the faded-out transport area would toggle playback
+            // instead of dragging the strip. Wait for the fade to finish so the
+            // buttons stay usable while they are still on screen.
+            panelFade.Completed += (_, _) => TransportPanel.IsHitTestVisible = false;
+        }
+
+        TransportPanel.BeginAnimation(OpacityProperty, panelFade);
+
+        // The track information fades with the buttons it sits beside, so the cluster reads
+        // as one thing arriving rather than as a cover arriving and a title following it.
+        InfoPanel.BeginAnimation(OpacityProperty, FadeTo(target, fadeMs));
+
+        // The drag pill comes and goes with the controls, on the same clock, so the two
+        // read as one gesture rather than as two elements fading independently.
+        DragHandle.BeginAnimation(OpacityProperty, FadeTo(target, fadeMs));
+
+        UpdateLyricShift(animate: true);
+    }
+
+    /// <summary>
+    /// An opacity ramp from wherever the property currently is to <paramref name="value"/>,
+    /// with the easing every other hover transition on this strip uses.
+    /// </summary>
+    private static DoubleAnimation FadeTo(double value, int milliseconds) =>
+        new(value, TimeSpan.FromMilliseconds(milliseconds))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+
+    /// <summary>
+    /// Hand the lyric lines the room beside the hover cluster, and take it back when it leaves.
+    /// <para>
+    /// The lines span the whole band, so that room is expressed as an inset at their left edge:
+    /// with the cluster out of sight the inset is zero and the words are centred in the strip,
+    /// and while it is on screen the words are laid out in what is left beside it. Laid out, not
+    /// clipped — an earlier version slid the lines aside and clipped the sliver that would have
+    /// run under the cluster, which sliced the front off every line (a 128 DIP line came back
+    /// 74 DIP wide). The pixel check caught it: a lyric you cannot read is worse than one that
+    /// is not quite where a longer line would have put it.
+    /// </para>
+    /// <para>
+    /// The inset is measured from the cluster itself, so it follows whatever it actually holds
+    /// (cover, title, artist, buttons, readout) with no hard-coded width anywhere, and stays
+    /// right when a longer title widens it.
+    /// </para>
+    /// </summary>
+    private void UpdateLyricShift(bool animate)
+    {
+        // The cluster's width plus the gap it keeps on its right, in the same coordinate space
+        // the lines live in: both start at the content grid's left edge. A cluster that has not
+        // been measured yet reports zero, which is exactly the inset to apply until it does —
+        // and a cluster with nothing left in it (every part switched off) imposes nothing, gap
+        // included, so the words stay centred rather than being nudged aside by an empty box.
+        var occupied = !_hoverReveal || _hovered;
+        var clusterWidth = LeftCluster.ActualWidth;
+        var inset = occupied && clusterWidth > 0.5 ? clusterWidth + LeftCluster.Margin.Right : 0.0;
+
+        // NaN is the field's initial value and means "never logged yet": comparing against it
+        // would be false for every target, so the first inset would go unrecorded.
+        if (Diag.Enabled && (double.IsNaN(_diagInset) || Math.Abs(inset - _diagInset) > 0.5))
+        {
+            _diagInset = inset;
+            Diag.Log($"[overlay] lyric inset={inset:F1} " +
+                     $"cluster={LeftCluster.ActualWidth:F1} info={InfoPanel.ActualWidth:F1} " +
+                     $"title={SongTitle.ActualWidth:F1} artist={SongArtist.ActualWidth:F1} " +
+                     $"trans={TransportPanel.ActualWidth:F1} strip={ActualWidth:F1} " +
+                     $"line={CurrentLine.ActualWidth:F1} occupied={occupied} hovered={_hovered}");
+        }
+
+        // Opening is a smaller move than closing (the cluster's width either way, but during a
+        // reveal the eye is already following the fade), so it gets the shorter ramp.
+        var duration = TimeSpan.FromMilliseconds(inset == 0 ? 160 : 240);
+
+        foreach (var line in new[] { CurrentLine, NextLine })
+        {
+            if (!animate)
+            {
+                // Clear any ramp first: an animation outranks a local value, so assigning the
+                // property while one is running would be silently ignored.
+                line.BeginAnimation(KaraokeLine.ContentInsetProperty, null);
+                line.ContentInset = inset;
+                continue;
+            }
+
+            line.BeginAnimation(
+                KaraokeLine.ContentInsetProperty,
+                new DoubleAnimation(inset, duration)
+                {
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                });
+        }
+    }
+
+    /// <summary>
+    /// A shadow with no offset, used to thicken thin text with the opposite colour so it
+    /// stays readable where it sits straight on the taskbar.
+    /// </summary>
+    private static DropShadowEffect HaloEffect(Color outline) =>
+        new()
+        {
+            Color = outline,
+            ShadowDepth = 0,
+            BlurRadius = 3,
+            Opacity = 0.9,
+        };
+
+    /// <summary>
+    /// Write the current track's title and artist into the hover cluster.
+    /// <para>
+    /// This runs on every media poll, so assigning the same words again is a no-op: equal
+    /// text would otherwise invalidate the cluster's text layout for nothing. A different
+    /// title can widen the cluster, and the place the words are carried to is measured from
+    /// the cluster, so the shift is re-taken by the cluster's own size watcher afterwards.
+    /// </para>
+    /// </summary>
+    internal void SetTrackInfo(string? title, string? artist)
+    {
+        var newTitle = title ?? string.Empty;
+        var newArtist = artist ?? string.Empty;
+
+        if (SongTitle.Text == newTitle && SongArtist.Text == newArtist) return;
+
+        SongTitle.Text = newTitle;
+        SongArtist.Text = newArtist;
+    }
+
+    /// <summary>
+    /// Hand the strip the current track's artwork, or <c>null</c> when there is none.
+    /// <para>
+    /// Cheap to call with the same value or with nothing at all, because most tracks in a
+    /// session either have no art or keep the same art across a whole album, and neither
+    /// case should repaint the strip on every poll.
+    /// </para>
+    /// </summary>
+    internal void SetCoverArt(ImageSource? art)
+    {
+        if (ReferenceEquals(art, _coverArt)) return;
+
+        _coverArt = art;
+        ApplyCoverBackground();
+    }
+
+    /// <summary>
+    /// Paint the cover slot with the track's picture, or with the faint plate that stands in
+    /// for one.
+    /// <para>
+    /// The picture goes on as the border's own background rather than as an image child: a
+    /// border clips its background to its corner radius but leaves its children square, so
+    /// the rounded corner the reference uses only comes out this way. The brush is kept and
+    /// re-pointed instead of rebuilt, so switching tracks does not hand the render thread a
+    /// new brush to freeze for no visible difference.
+    /// </para>
+    /// </summary>
+    private void ApplyCoverBackground()
+    {
+        if (_coverArt is null)
+        {
+            _coverBrush.ImageSource = null;
+            CoverBox.Background = Frozen(WithAlpha(_transportInk, 0x1F));
+            CoverPlaceholder.Visibility = Visibility.Visible;
+            return;
+        }
+
+        _coverBrush.ImageSource = _coverArt;
+        CoverBox.Background = _coverBrush;
+        CoverPlaceholder.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>
@@ -918,27 +1451,60 @@ public partial class OverlayWindow : Window
         }
     }
 
+    /// <summary>
+    /// Point the play/pause button at what pressing it would do next: the play triangle
+    /// while the player is paused, the pause bars while it is playing. The old text glyph
+    /// showed both at once and could not say which.
+    /// </summary>
+    private void SetPlayPauseIcon(bool isPlaying)
+    {
+        var icon = isPlaying ? _pauseIcon : _playIcon;
+        if (ReferenceEquals(PlayPauseButton.Icon, icon)) return;
+
+        PlayPauseButton.Icon = icon;
+        Diag.Log($"[overlay] transport icon -> {(isPlaying ? "pause" : "play")}");
+    }
+
     private void RenderCore(LyricDocument? document, TimeSpan position, bool isPlaying)
     {
+        SetPlayPauseIcon(isPlaying);
+
         if (document is null || document.IsEmpty)
         {
-            CurrentLine.Text = string.Empty;
+            SetCurrentText(string.Empty);
             CurrentLine.Translation = null;
             NextLine.Text = string.Empty;
             NextLine.Translation = null;
-            Diag.Log("[overlay] Render -> empty document");
+
+            // Logged once per transition: with no document this branch runs every frame,
+            // and a per-frame file write costs more than the frame it describes.
+            if (Diag.Enabled && _diagIndex != -1)
+            {
+                _diagIndex = -1;
+                _diagWidth = double.NaN;
+                Diag.Log("[overlay] Render -> empty document");
+            }
+
             return;
         }
 
         var index = document.IndexAt(position);
-        Diag.Log($"[overlay] Render pos={position:mm\\:ss\\.ff} index={index} " +
-                 $"lines={document.Lines.Count} W={Width} H={Height} " +
-                 $"ActualW={ActualWidth:F1} ActualH={ActualHeight:F1} " +
-                 $"vis={IsVisible} left={Left:F0} top={Top:F0}");
+
+        // Logged when the line or the geometry changes rather than per frame: one file write
+        // per frame costs more than the frame itself and distorts what the log is read for.
+        if (Diag.Enabled && (index != _diagIndex || Math.Abs(Width - _diagWidth) > 0.5))
+        {
+            _diagIndex = index;
+            _diagWidth = Width;
+            Diag.Log($"[overlay] Render pos={position:mm\\:ss\\.ff} index={index} " +
+                     $"lines={document.Lines.Count} W={Width} H={Height} " +
+                     $"ActualW={ActualWidth:F1} ActualH={ActualHeight:F1} " +
+                     $"vis={IsVisible} left={Left:F0} top={Top:F0}");
+        }
         if (index < 0)
         {
             // Pre-roll: show the first upcoming line without a sweep.
-            CurrentLine.Text = document.Lines.Count > 0 ? document.Lines[0].Text : string.Empty;
+            SetCurrentText(document.Lines.Count > 0 ? document.Lines[0].Text : string.Empty);
             CurrentLine.Translation = _settings.ShowTranslation
                 ? document.Lines.FirstOrDefault()?.Translation
                 : null;
@@ -950,17 +1516,46 @@ public partial class OverlayWindow : Window
 
         var line = document.Lines[index];
 
-        CurrentLine.Text = line.Text;
+        SetCurrentText(line.Text);
         CurrentLine.Translation = _settings.ShowTranslation ? line.Translation : null;
         CurrentLine.Syllables = line.Syllables.Count > 0 ? line.Syllables : null;
         CurrentLine.LineStart = line.Start;
-        // Use the *sung* span, not the gap to the next line: that gap contains any
-        // instrumental passage, and sweeping the highlight across it is what made the
-        // progress disagree with the actual singing.
         CurrentLine.LineEnd = line.Start + line.SungDuration;
         CurrentLine.Progress = ComputeProgress(line, position);
 
         SetNext(document, index + 1);
+    }
+
+    /// <summary>
+    /// Push the current line's text, fading the line in when it actually changed.
+    /// <para>
+    /// The render tick rewrites the same text a dozen times a second, so the fade is
+    /// armed on the text transition only — otherwise every tick would restart it and
+    /// the line would never reach full opacity.
+    /// </para>
+    /// </summary>
+    private void SetCurrentText(string text)
+    {
+        var changed = !string.Equals(_renderedText, text, StringComparison.Ordinal);
+
+        CurrentLine.Text = text;
+
+        if (!changed) return;
+
+        _renderedText = text;
+
+        if (!_settings.LineTransition) return;
+
+        // Fade from just below full: enough to read as a settle rather than a cut,
+        // short enough that the first syllable is never dimmed. FillBehavior.Stop
+        // hands the property back to its base value (1.0) when the animation ends.
+        CurrentLine.BeginAnimation(
+            OpacityProperty,
+            new DoubleAnimation(0.45, 1.0, TimeSpan.FromMilliseconds(110))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop,
+            });
     }
 
     private void SetNext(LyricDocument document, int index)
@@ -978,11 +1573,24 @@ public partial class OverlayWindow : Window
         NextLine.Progress = 0;
     }
 
-    private static double ComputeProgress(LyricLine line, TimeSpan position)
+    /// <summary>
+    /// Compute the karaoke sweep progress for a line at the given position.
+    /// <para>
+    /// For lines with real syllable data, progress is linear over the syllable span
+    /// — the per-word timing already encodes the singing rhythm.
+    /// </para>
+    /// <para>
+    /// For lines without syllable data, progress uses the full inter-line gap with
+    /// an <b>adaptive ease-out curve</b>. The curve exponent is derived from text
+    /// density (characters per second of gap): dense lines (fast singing, short
+    /// gap) get near-linear progress; sparse lines (few characters, long gap —
+    /// likely an instrumental tail) get stronger ease-out so the sweep finishes
+    /// early and holds at 100% during the tail. This replaces the old fixed-rate
+    /// (3.5 syllables/sec) vocal-span estimate, which was wrong for most songs.
+    /// </para>
+    /// </summary>
+    internal static double ComputeProgress(LyricLine line, TimeSpan position)
     {
-        // Progress runs over the sung span. Once it completes the line holds fully
-        // highlighted while any instrumental tail plays out — the correct behaviour,
-        // and what stops the sweep from lagging behind the voice.
         var span = line.SungDuration > TimeSpan.Zero ? line.SungDuration : line.Duration;
         if (span <= TimeSpan.Zero) return 1;
 
@@ -990,7 +1598,41 @@ public partial class OverlayWindow : Window
         if (elapsed <= TimeSpan.Zero) return 0;
         if (elapsed >= span) return 1;
 
-        return elapsed / span;
+        var t = elapsed / span;
+
+        // Syllable-timed lines: linear is correct — the syllable boundaries encode
+        // the actual rhythm, and KaraokeLine.MeasureSungWidth maps progress to
+        // per-syllable positions.
+        if (line.Syllables.Count > 0) return t;
+
+        // No syllable data: apply adaptive ease-out.
+        // exponent ≈ 1.0 (linear) for dense text, up to ~1.6 for sparse text.
+        var density = LineTextDensity(line.Text, span);
+        var exponent = density switch
+        {
+            >= 3.0 => 1.05,  // dense: near-linear
+            >= 1.5 => 1.2,   // medium: slight ease-out
+            _ => 1.5,        // sparse: stronger ease-out for instrumental tails
+        };
+
+        return 1 - Math.Pow(1 - t, exponent);
+    }
+
+    /// <summary>
+    /// Estimated character density: non-space characters per second of gap.
+    /// Used only to pick the ease-out curve exponent, not to estimate duration.
+    /// </summary>
+    private static double LineTextDensity(string? text, TimeSpan span)
+    {
+        if (string.IsNullOrEmpty(text) || span <= TimeSpan.Zero) return 0;
+
+        int chars = 0;
+        foreach (var ch in text)
+        {
+            if (!char.IsWhiteSpace(ch)) chars++;
+        }
+
+        return chars / span.TotalSeconds;
     }
 
     // ---- dragging ------------------------------------------------------
@@ -1005,6 +1647,7 @@ public partial class OverlayWindow : Window
         _dragging = true;
         _dragOrigin = PointToScreen(e.GetPosition(this));
         _dragStartOffsetX = _settings.OffsetX;
+        SetDragHandleDragging(true);
 
         // Pause the reposition timer during drag so it does not fight the live
         // preview by calling PlaceOverWindow with stale offsets.
@@ -1036,6 +1679,7 @@ public partial class OverlayWindow : Window
         if (!_dragging) return;
 
         _dragging = false;
+        SetDragHandleDragging(false);
         ReleaseMouseCapture();
 
         // Resume the reposition timer now that the drag is finished.

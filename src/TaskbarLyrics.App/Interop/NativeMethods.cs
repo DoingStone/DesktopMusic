@@ -74,6 +74,10 @@ public static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern IntPtr MonitorFromPoint(POINT pt, int dwFlags);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetCursorPos(out POINT lpPoint);
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct POINT
     {

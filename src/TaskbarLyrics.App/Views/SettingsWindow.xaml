@@ -23,10 +23,30 @@
       (snap/maximise) for free; the window buttons opt back into hit testing.
     -->
     <WindowChrome.WindowChrome>
-        <WindowChrome CaptionHeight="44"
-                      ResizeBorderThickness="6"
+        <!-- 32 = the caption buttons' own height, so the row's bottom edge lands exactly
+             on their underside and the divider below meets them with no gap. -->
+        <!-- 8 gives a comfortable grab band. The band is also enforced in code
+             (HitTestHook) rather than relying on WindowChrome and DWM agreeing, which
+             they do not once GlassFrameThickness makes the whole window frame. -->
+        <!--
+          GlassFrameThickness is 0, not -1.
+
+          -1 means "the whole window is frame". That makes WM_NCCALCSIZE report a zero
+          client area, so the entire window becomes NON-CLIENT and DWM takes over hit
+          testing. WPF then never receives a client press: a press-and-move is treated as
+          a caption drag (the window moves) and the caption buttons never get
+          WM_LBUTTONDOWN (the close button does nothing). Neither
+          WindowChrome.IsHitTestVisibleInChrome nor CaptionHeight nor an app-side
+          WM_NCHITTEST answer can change that, because DWM is not the one asking.
+
+          0 keeps a real client area, so WPF owns input. The title strip is dragged and
+          the edges are resized by code in HitTestHook, which runs in the client path and
+          is therefore actually consulted.
+        -->
+        <WindowChrome CaptionHeight="0"
+                      ResizeBorderThickness="8"
                       CornerRadius="0"
-                      GlassFrameThickness="-1"
+                      GlassFrameThickness="0"
                       UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
 
@@ -282,6 +302,35 @@
         </Style>
 
         <!--
+          Pane toggle: the same glyph-only button as the captions, but its click area is a
+          disc instead of a rectangle, because it sits alone in the pane header next to the
+          app identity - a faint rectangle there read as a stray box, and the reference the
+          user supplied draws this button as a circle. Square box + CornerRadius = half the
+          side is what makes it a true circle rather than a stadium.
+        -->
+        <Style x:Key="PaneToggleButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome" CornerRadius="14" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#0F000000" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#1A000000" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
           Close keeps the system's red hover, so the destructive action is unmistakable.
           The comment above this style previously claimed it did; it did not.
         -->
@@ -336,10 +385,12 @@
           text and a short accent bar to its left, matching the reference.
         -->
         <Style x:Key="NavItem" TargetType="ListBoxItem">
-            <Setter Property="Padding" Value="0" />
+            <!-- Content margin, bound by the template below. It is what changes between
+                 the wide pane (icon + label) and the compact rail (icon only, centred). -->
+            <Setter Property="Padding" Value="13,10" />
             <Setter Property="Margin" Value="0,1" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="Foreground" Value="{DynamicResource NavItemFg}" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -362,7 +413,11 @@
                                     Margin="3,0,8,0"
                                     CornerRadius="5"
                                     Background="Transparent">
-                                <ContentPresenter Margin="13,10" VerticalAlignment="Center" />
+                                <!-- Bound, not fixed: the wide pane left-aligns icon and
+                                     label, the narrow rail centres a lone icon. -->
+                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="Center" />
                             </Border>
                         </Grid>
                         <ControlTemplate.Triggers>
@@ -569,47 +624,24 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="44" />
+            <!-- Matches the caption buttons' height so the divider below sits flush
+                 against their underside instead of leaving a 12 px band. -->
+            <RowDefinition Height="32" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!--
-          Merged title bar: the app identity sits over the navigation pane and the
-          window buttons over the content, so the two surfaces read as one window
-          instead of a caption bolted on top.
+          Title strip, content column only.
+
+          The navigation pane now spans the full window height, so there is no title bar
+          over it. The app identity and the pane toggle moved inside the pane and are laid
+          out by it, which removes the hand-computed margins that had to be resynchronised
+          on every sash drag. What is left here is the drag surface and the window buttons.
         -->
-        <Border Grid.Row="0" Background="{DynamicResource NavBg}" />
-        <Border x:Name="TitleFiller" Grid.Row="0" Background="{DynamicResource ContentBg}" Margin="232,0,0,0" />
+        <Border Grid.Row="0" Grid.Column="2" Background="{DynamicResource ContentBg}" />
 
-        <!--
-          The reference keeps the collapse control at the navigation pane's right edge,
-          so the identity sits flush at 18 px and the toggle is pushed to 232. There is
-          no hamburger at the window's far left, and its absence is what lets the app name
-          line up with the navigation items below it.
-        -->
-        <StackPanel x:Name="TitleIdentity"
-                    Grid.Row="0" Orientation="Horizontal"
-                    Margin="18,0,0,0" VerticalAlignment="Center">
-            <Image x:Name="AppIconImage" Width="20" Height="20"
-                   RenderOptions.BitmapScalingMode="HighQuality" />
-            <TextBlock Text="任务栏歌词"
-                       Margin="10,0,0,0" VerticalAlignment="Center"
-                       FontSize="12.5" FontWeight="SemiBold"
-                       Foreground="{DynamicResource Fg}" />
-        </StackPanel>
-
-        <Button x:Name="NavToggleButton"
-                Grid.Row="0"
-                HorizontalAlignment="Left" VerticalAlignment="Center"
-                Margin="196,0,0,0"
-                Content="&#xE700;"
-                Click="OnToggleNav"
-                Style="{StaticResource CaptionButton}"
-                Width="32"
-                WindowChrome.IsHitTestVisibleInChrome="True" />
-
-        <StackPanel Grid.Row="0" Orientation="Horizontal"
+        <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal"
                     HorizontalAlignment="Right" VerticalAlignment="Top"
                     WindowChrome.IsHitTestVisibleInChrome="True">
             <Button x:Name="MinimiseButton" Content="&#xE921;" Click="OnMinimise"
@@ -620,20 +652,83 @@
                     Style="{StaticResource CloseCaptionButton}" />
         </StackPanel>
 
-        <Grid Grid.Row="1">
+        <!-- Spans the title strip as well, so the pane is one continuous surface from the
+             top edge down and nothing has to be positioned from outside it. -->
+        <Grid Grid.Row="0" Grid.RowSpan="2">
             <Grid.ColumnDefinitions>
                 <!-- Navigation pane, as in the Windows 11 Settings reference. -->
-                <ColumnDefinition x:Name="NavColumn" Width="232" />
+                <ColumnDefinition x:Name="NavColumn" Width="232" MinWidth="168" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <!-- Same height as the caption buttons so the content's divider lands on
+                     their underside. -->
+                <RowDefinition Height="32" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-            <!-- ==================== 侧边导航 ==================== -->
+            <!--
+              ==================== 侧边导航 ====================
+              No right border here: the sash draws the single divider. Having both drew two
+              hairlines 4 px apart with the window background showing between them, which
+              read as a defect. The border is restored when the pane is collapsed and the
+              sash is hidden, so the rail still has an edge.
+            -->
             <Border x:Name="NavPane"
+                    Grid.Row="0" Grid.RowSpan="2"
                     Grid.Column="0"
                     Background="{DynamicResource NavBg}"
-                    BorderBrush="{DynamicResource Line}"
-                    BorderThickness="0,0,1,0">
+                    BorderThickness="0">
                 <DockPanel>
+
+                    <!--
+                      Pane header. Laid out by the pane itself, so the identity sits at its
+                      left edge and the toggle is pinned to its right edge at any width -
+                      no margins to recompute when the sash moves.
+                    -->
+                    <Grid DockPanel.Dock="Top" Height="32">
+                        <StackPanel x:Name="TitleIdentity"
+                                    Orientation="Horizontal"
+                                    Margin="18,0,0,0" VerticalAlignment="Center">
+                            <Image x:Name="AppIconImage" Width="20" Height="20"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <TextBlock Text="任务栏歌词"
+                                       Margin="10,0,0,0" VerticalAlignment="Center"
+                                       FontSize="12.5" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource Fg}" />
+                        </StackPanel>
+
+                        <!--
+                          Drawn rather than taken from an icon font: a rounded panel
+                          outline with a divider at one third and the left cell tinted,
+                          which is what the reference shows and a hamburger does not
+                          convey.
+                        -->
+                        <Button x:Name="NavToggleButton"
+                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Margin="0,0,8,0"
+                                Click="OnToggleNav"
+                                Width="28" Height="28"
+                                Style="{StaticResource PaneToggleButton}"
+                                WindowChrome.IsHitTestVisibleInChrome="True">
+                            <Grid Width="19" Height="15">
+                                <!-- Tinted left cell, drawn first so the outline covers
+                                     its corners. -->
+                                <Border Width="7" HorizontalAlignment="Left"
+                                        CornerRadius="3.5,0,0,3.5"
+                                        Background="{DynamicResource Fg}" Opacity="0.26" />
+                                <!-- Divider at one third. -->
+                                <Border Width="1.2" HorizontalAlignment="Left" Margin="6.4,0,0,0"
+                                        Background="{DynamicResource Fg}" />
+                                <!-- Outline last, so it sits on top of both. -->
+                                <Border CornerRadius="3.5"
+                                        BorderThickness="1.2"
+                                        BorderBrush="{DynamicResource Fg}"
+                                        Background="Transparent" />
+                            </Grid>
+                        </Button>
+                    </Grid>
 
                     <ListBox x:Name="NavList"
                              Background="Transparent"
@@ -650,7 +745,7 @@
                                       StrokeThickness="1.5"
                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                       Data="M3,5 H15 M3,9 H15 M3,13 H15" />
-                                <TextBlock Text="常规" Style="{StaticResource NavText}" />
+                                <TextBlock x:Name="NavLabel1" Text="常规" Style="{StaticResource NavText}" />
                             </StackPanel>
                         </ListBoxItem>
 
@@ -663,7 +758,7 @@
                                              HorizontalAlignment="Right" VerticalAlignment="Bottom"
                                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" />
                                 </Grid>
-                                <TextBlock Text="外观" Style="{StaticResource NavText}" />
+                                <TextBlock x:Name="NavLabel2" Text="外观" Style="{StaticResource NavText}" />
                             </StackPanel>
                         </ListBoxItem>
 
@@ -674,7 +769,7 @@
                                       StrokeThickness="1.5"
                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                       Data="M2,4 H16 V14 H2 Z M7,18 H11 M9,14 V18" />
-                                <TextBlock Text="位置与显示" Style="{StaticResource NavText}" />
+                                <TextBlock x:Name="NavLabel3" Text="位置与显示" Style="{StaticResource NavText}" />
                             </StackPanel>
                         </ListBoxItem>
 
@@ -694,7 +789,7 @@
                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
                                              StrokeThickness="1.5" />
                                 </Grid>
-                                <TextBlock Text="歌词来源" Style="{StaticResource NavText}" />
+                                <TextBlock x:Name="NavLabel4" Text="歌词来源" Style="{StaticResource NavText}" />
                             </StackPanel>
                         </ListBoxItem>
 
@@ -703,7 +798,7 @@
                                 <Path Width="18" Height="18" Stretch="Uniform"
                                       Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
                                       Data="M5,3 L15,9 L5,15 Z" />
-                                <TextBlock Text="播放控制" Style="{StaticResource NavText}" />
+                                <TextBlock x:Name="NavLabel5" Text="播放控制" Style="{StaticResource NavText}" />
                             </StackPanel>
                         </ListBoxItem>
 
@@ -717,7 +812,7 @@
                                           StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                           Data="M9,8.2 V13 M9,5.4 V5.5" />
                                 </Grid>
-                                <TextBlock Text="关于" Style="{StaticResource NavText}" />
+                                <TextBlock x:Name="NavLabel6" Text="关于" Style="{StaticResource NavText}" />
                             </StackPanel>
                         </ListBoxItem>
                     </ListBox>
@@ -725,7 +820,58 @@
             </Border>
 
             <!-- ==================== 内容区 ==================== -->
-            <Border Grid.Column="1" Background="{DynamicResource ContentBg}">
+
+            <!--
+              Sash between the navigation pane and the content. It owns the only divider
+              line, centred in a 5 px grab band, and brightens on hover so it is
+              discoverable.
+
+              IsHitTestVisibleInChrome is what keeps a press here from being treated as a
+              caption drag: without it WindowChrome hands non-interactive areas to the
+              window drag, which is what made the whole window move instead of the
+              divider.
+            -->
+            <GridSplitter x:Name="NavSplitter"
+                          Grid.Row="0" Grid.RowSpan="2"
+                          Grid.Column="1"
+                          Width="5"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          ResizeBehavior="PreviousAndNext"
+                          ResizeDirection="Columns"
+                          ShowsPreview="False"
+                          Cursor="SizeWE"
+                          Background="{DynamicResource ContentBg}"
+                          WindowChrome.IsHitTestVisibleInChrome="True"
+                          DragCompleted="OnNavSplitterDragCompleted">
+                <GridSplitter.Template>
+                    <ControlTemplate TargetType="GridSplitter">
+                        <!--
+                          The band is filled with the content colour and the line sits on
+                          its left edge, exactly where the pane ends. Leaving the band
+                          transparent showed 2 px of window background between the pane and
+                          the line, which is the gap that read as a defect.
+                        -->
+                        <Border x:Name="Sash" Background="{TemplateBinding Background}">
+                            <Border x:Name="SashLine"
+                                    Width="1"
+                                    HorizontalAlignment="Left"
+                                    Background="{DynamicResource Line}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="SashLine" Property="Width" Value="3" />
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="SashLine" Property="Width" Value="3" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </GridSplitter.Template>
+            </GridSplitter>
+
+            <!-- Below the content's title strip, which the root grid draws. -->
+            <Border Grid.Row="1" Grid.Column="2" Background="{DynamicResource ContentBg}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -775,8 +921,25 @@
                                         <CheckBox x:Name="TransportControlsCheck"
                                                   Content="显示播放控制按钮（上一首 / 暂停 / 下一首）"
                                                   Click="OnOptionChanged" />
+                                        <CheckBox x:Name="HoverRevealControlsCheck"
+                                                  Content="鼠标移上去才显示控制按钮（平时只留歌词）"
+                                                  Click="OnOptionChanged" />
                                         <CheckBox x:Name="SongProgressCheck"
                                                   Content="显示歌曲进度（播放按键下方）"
+                                                  Click="OnOptionChanged" />
+
+                                        <!-- These three ride the same hover reveal as the
+                                             buttons: they appear together on the left while the
+                                             pointer is on the strip, and the words take the
+                                             whole band back once it leaves. -->
+                                        <CheckBox x:Name="SongTitleCheck"
+                                                  Content="鼠标移上去显示歌曲名"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="SongArtistCheck"
+                                                  Content="鼠标移上去显示歌手"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="CoverArtCheck"
+                                                  Content="鼠标移上去显示唱片封面"
                                                   Click="OnOptionChanged" />
                                     </StackPanel>
                                 </GroupBox>
@@ -895,6 +1058,9 @@
                                     <StackPanel>
                                         <CheckBox x:Name="ShowBackgroundCheck" Content="显示背景板（提升浅色任务栏下的可读性）"
                                                   Click="OnOptionChanged" />
+                                        <CheckBox x:Name="AutoAdaptColorsCheck"
+                                                  Content="自动适配任务栏配色（浅色任务栏用深色字，无需背景板）"
+                                                  Click="OnOptionChanged" />
 
                                         <Grid Margin="0,6,0,0">
                                             <Grid.ColumnDefinitions>
@@ -918,6 +1084,8 @@
                                         <CheckBox x:Name="ShowTranslationCheck" Content="显示翻译行"
                                                   Click="OnOptionChanged" />
                                         <CheckBox x:Name="ShowContextCheck" Content="显示下一行预览"
+                                                  Click="OnOptionChanged" />
+                                        <CheckBox x:Name="LineTransitionCheck" Content="歌词换行时淡入淡出"
                                                   Click="OnOptionChanged" />
                                     </StackPanel>
                                 </GroupBox>
@@ -1061,6 +1229,11 @@
                                         <TextBlock Text="多个来源会并发检索，再按标题、歌手、时长打分择优。"
                                                    Foreground="{DynamicResource FgMuted}" FontSize="11"
                                                    TextWrapping="Wrap" Margin="0,0,0,8" />
+                                        <!-- Word timing first: it is the only source that can
+                                             follow the singing rather than the line. -->
+                                        <CheckBox x:Name="WordLyricsCheck"
+                                                  Content="逐字时间轴（AMLL 社区库，高亮跟随每个字）"
+                                                  Click="OnProviderChanged" />
                                         <CheckBox x:Name="QqMusicCheck" Content="QQ音乐（中文曲库最全）"
                                                   Click="OnProviderChanged" />
                                         <CheckBox x:Name="NetEaseCheck" Content="网易云音乐（补充曲库与翻译）"

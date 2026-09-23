@@ -5,6 +5,8 @@ public enum LyricSourceKind
 {
     None = 0,
     QqMusic,
+    /// <summary>Community TTML with per-word timing (AMLL TTML DB).</summary>
+    AmllTtml,
     NetEase,
     Kugou,
     Lrclib,
@@ -150,6 +152,26 @@ public sealed class LyricDocument
         for (int i = 0; i < _lines.Length; i++)
         {
             var line = _lines[i];
+
+            // Word timing is ground truth, so a line that has it keeps its own end.
+            //
+            // Stretching such a line to the next line's start - which is what the
+            // no-timing branch below does, and what this method used to do
+            // unconditionally - silently truncates it. Two singers overlap in a duet, so
+            // the next line can begin before this one finishes; the truncated tail then
+            // holds syllables whose times fall outside the line and the renderer never
+            // lights them. Measured on a real TTML file: three syllables lost.
+            if (line.Syllables.Count > 0)
+            {
+                var last = line.Syllables[^1].End;
+
+                // Never end before the singing does, whatever the source claimed.
+                if (line.End < last) line.End = last;
+
+                line.SungDuration = last > line.Start ? last - line.Start : line.Duration;
+                continue;
+            }
+
             if (i + 1 < _lines.Length)
             {
                 var next = _lines[i + 1].Start;
@@ -157,68 +179,19 @@ public sealed class LyricDocument
             }
             else if (line.End <= line.Start)
             {
-                // Last line: fall back to something plausible rather than zero.
                 line.End = line.Start + Defaults.TailLineDuration;
             }
 
-            // Real syllable timing, when the source provided it, is ground truth.
-            if (line.Syllables.Count > 0)
-            {
-                var last = line.Syllables[^1].End;
-                line.SungDuration = last > line.Start ? last - line.Start : line.Duration;
-                continue;
-            }
-
-            line.SungDuration = EstimateVocalSpan(line.Text, line.Duration);
+            // No syllable data: use the full inter-line gap. The previous approach
+            // estimated vocal span from a fixed syllable rate (3.5/s), which was
+            // wrong for most songs — too slow for pop/rap (highlight lagged behind
+            // the voice), too fast for ballads (highlight finished before the line
+            // ended). Using the actual LRC gap is the most reliable fallback: the
+            // sweep spans exactly the time between this line and the next, driven by
+            // the timestamps the lyric file actually provides. An adaptive ease-out
+            // curve in the renderer then handles instrumental tails naturally.
+            line.SungDuration = line.Duration;
         }
-    }
-
-    /// <summary>
-    /// Estimate how long a line takes to sing, from its character count.
-    /// <para>
-    /// The gap to the next line includes instrumental time, which must not be
-    /// counted as singing. A character-rate estimate pins the highlight to the vocal
-    /// rather than to the whole inter-line span. Rates are conservative mid-tempo
-    /// values; the result is clamped to the available span and to a floor so a very
-    /// short line still animates.
-    /// </para>
-    /// </summary>
-    private static TimeSpan EstimateVocalSpan(string? text, TimeSpan available)
-    {
-        if (string.IsNullOrEmpty(text) || available <= TimeSpan.Zero) return available;
-
-        int cjk = 0, other = 0, spaces = 0;
-
-        foreach (var ch in text)
-        {
-            if (char.IsWhiteSpace(ch)) { spaces++; continue; }
-
-            // CJK ideographs, kana and Hangul are one syllable per character.
-            if (ch >= 0x2E80) cjk++;
-            else if (char.IsLetterOrDigit(ch)) other++;
-        }
-
-        // A rough syllable count: CJK characters are syllables; for Latin script,
-        // assume ~3 characters per syllable.
-        double syllables = cjk + (other / 3.0);
-        if (syllables < 1) syllables = 1;
-
-        // Mid-tempo singing is roughly 3.5 syllables per second.
-        const double SyllablesPerSecond = 3.5;
-        var estimate = TimeSpan.FromSeconds(syllables / SyllablesPerSecond);
-
-        // Never claim more time than actually exists before the next line.
-        if (estimate > available) estimate = available;
-
-        // Keep a small floor so one- and two-character lines still visibly sweep.
-        // Deliberately an absolute value rather than a fraction of the gap: scaling it
-        // to the gap would reintroduce the very problem being fixed, letting a two
-        // character line creep for seconds through an instrumental passage.
-        var floor = TimeSpan.FromSeconds(1.2);
-        if (estimate < floor) estimate = floor < available ? floor : available;
-
-        _ = spaces;
-        return estimate;
     }
 
     private static class Defaults

@@ -11,9 +11,36 @@ public sealed class AppSettings
 {
     // ---- appearance ----------------------------------------------------
     public string FontFamily { get; set; } = "Microsoft YaHei UI";
-    public double OriginalFontSize { get; set; } = 12.5;
-    public double TranslationFontSize { get; set; } = 11.0;
+
+    /// <summary>
+    /// Lyric font size in DIP.
+    /// <para>
+    /// 11 matches the reference implementation (Soda Music's taskbar widget uses
+    /// <c>font-size:11px</c>). A taskbar strip is a glanceable surface: at this size
+    /// the whole line sits on one calm baseline instead of dominating the bar, which
+    /// is most of why the reference reads as part of the shell rather than as a
+    /// sticker on top of it.
+    /// </para>
+    /// </summary>
+    public double OriginalFontSize { get; set; } = 11.0;
+
+    public double TranslationFontSize { get; set; } = 10.0;
     public bool ShowTranslation { get; set; } = true;
+
+    /// <summary>
+    /// Derive the lyric palette from the taskbar behind the strip instead of using
+    /// the colours below.
+    /// <para>
+    /// The reference implementation never picks a lyric colour by hand: it asks the
+    /// shell whether the surface is light or dark (<c>light-dark()</c>) and then uses
+    /// the same hue at two alphas — 50% for unsung, 90% for sung. Over a light
+    /// taskbar that means black text, over a dark one white text, so the strip keeps
+    /// the bar's own look instead of laying a fixed colour on top of it. The sampled
+    /// luminance is the same reading that already picks the transport glyph colour,
+    /// so this adds no new probing.
+    /// </para>
+    /// </summary>
+    public bool AutoAdaptColors { get; set; } = true;
 
     /// <summary>Colour of the already-sung portion of the current line.</summary>
     public string HighlightColor { get; set; } = "#FF3ABEFF";
@@ -35,7 +62,19 @@ public sealed class AppSettings
     public string BackgroundColor { get; set; } = "#B3121212";
 
     public bool ShowContextLines { get; set; } = true;
-    public bool ShowBackground { get; set; } = true;
+
+    /// <summary>
+    /// Draw the optional readability plate behind the text.
+    /// <para>
+    /// Off by default: the reference implementation's docked state is fully
+    /// transparent and only raises a plate while the widget is dragged out of the
+    /// taskbar. With <see cref="AutoAdaptColors"/> handling legibility, a permanent
+    /// plate is what makes a strip look pasted onto the bar rather than part of it.
+    /// Turn it on for wallpapers whose taskbar sample is unreliable (a busy gradient
+    /// or a maximised window showing through an acrylic bar).
+    /// </para>
+    /// </summary>
+    public bool ShowBackground { get; set; }
     public double BackgroundCornerRadius { get; set; } = 5;
 
     /// <summary>Enables the karaoke sweep highlight on the current line.</summary>
@@ -137,12 +176,53 @@ public sealed class AppSettings
     public bool ShowTransportControls { get; set; } = true;
 
     /// <summary>
+    /// Keep the transport controls invisible until the cursor is over the strip.
+    /// <para>
+    /// The reference implementation's docked widget is lyrics plus cover art and
+    /// nothing else; its buttons overlay the strip only while the pointer is inside
+    /// it. Only meaningful while the strip is interactive — a click-through overlay
+    /// receives no mouse messages, so its controls must stay visible to be usable at
+    /// all. Ignored when the hover cluster would be empty anyway — that is, when
+    /// <see cref="ShowTransportControls"/>, <see cref="ShowCoverArt"/>,
+    /// <see cref="ShowSongTitle"/> and <see cref="ShowSongArtist"/> are all off.
+    /// </para>
+    /// </summary>
+    public bool HoverRevealControls { get; set; } = true;
+
+    /// <summary>
+    /// Fade the incoming lyric line in over ~110 ms instead of swapping the text on
+    /// a single frame. Lines change every few seconds, so the cost is negligible and
+    /// the change stops reading as a flicker.
+    /// </summary>
+    public bool LineTransition { get; set; } = true;
+
+    /// <summary>
     /// Show the song progress bar and time readout beneath the transport buttons.
     /// </summary>
     public bool ShowSongProgress { get; set; } = true;
 
     /// <summary>Progress bar fill colour.</summary>
     public string ProgressBarColor { get; set; } = "#FF3ABEFF";
+
+    /// <summary>
+    /// Show the song title in the cluster that appears on hover, next to the cover.
+    /// <para>
+    /// Track information is deliberately hover-only: while the pointer is away the
+    /// strip holds nothing but the words, which is what lets the lyric line sit in
+    /// the middle of the whole band instead of only in the space the cluster leaves.
+    /// </para>
+    /// </summary>
+    public bool ShowSongTitle { get; set; } = true;
+
+    /// <summary>Show the artist beneath the title in the hover cluster.</summary>
+    public bool ShowSongArtist { get; set; } = true;
+
+    /// <summary>
+    /// Show the album art in the hover cluster. The art is read from the player's own
+    /// media session (SMTC thumbnail), so it is whatever the player published — no
+    /// extra network request and no per-player special case.
+    /// </summary>
+    public bool ShowCoverArt { get; set; } = true;
 
     /// <summary>
     /// Colour theme for the settings window: <c>system</c>, <c>light</c> or <c>dark</c>.
@@ -155,6 +235,9 @@ public sealed class AppSettings
     /// palette must stay reachable without a rebuild.
     /// </summary>
     public bool UseMica { get; set; } = true;
+
+    /// <summary>Navigation pane width in DIP, as left by the sash.</summary>
+    public double NavWidth { get; set; } = 232;
 
     /// <summary>Whether the settings navigation pane is collapsed.</summary>
     public bool NavCollapsed { get; set; }
@@ -173,6 +256,13 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; }
 
     // ---- providers -----------------------------------------------------
+    /// <summary>
+    /// Look up per-word (TTML) lyrics from the AMLL TTML DB before falling back to
+    /// line-level sources. Word timing is what makes the highlight track the singing
+    /// exactly, so this is on by default; it costs one lookup per track.
+    /// </summary>
+    public bool EnableWordLyrics { get; set; } = true;
+
     public bool EnableQqMusic { get; set; } = true;
     public bool EnableNetEase { get; set; } = true;
     public bool EnableLrclib { get; set; } = true;
@@ -190,7 +280,16 @@ public sealed class AppSettings
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "TaskbarLyrics");
 
-    public static string ConfigPath => Path.Combine(ConfigDirectory, "settings.json");
+    /// <summary>
+    /// The settings file this run works against. <c>TBL_SETTINGS</c> points it somewhere else,
+    /// which is how the verification scripts exercise a mode without reading or writing the
+    /// settings of whoever is signed in — the same escape hatch <c>TBL_DIAG</c> and
+    /// <c>TBL_COMPOSITE</c> already provide for the log and the compositing mode.
+    /// </summary>
+    public static string ConfigPath =>
+        Environment.GetEnvironmentVariable("TBL_SETTINGS") is { Length: > 0 } custom
+            ? custom
+            : Path.Combine(ConfigDirectory, "settings.json");
 
     public static AppSettings Load()
     {

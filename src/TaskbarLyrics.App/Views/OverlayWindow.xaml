@@ -24,42 +24,30 @@
         <SolidColorBrush x:Key="ProgressTextBrush" Color="#CCFFFFFF" />
 
         <!--
-            Compact transport buttons sized for the taskbar band. The hit area is
-            deliberately generous relative to the glyph: they are small targets on
-            a strip that the cursor crosses quickly.
+            Transport glyphs, taken from the reference widget's own SVG assets rather than
+            from a font, so the shapes match it exactly: prev/next are authored in a 16-unit
+            square, play/pause in a 20-unit one. Only the second subpath of each was rewritten
+            to start at an absolute point — after a closed subpath the current point is the
+            subpath's start, and stating that outright removes any doubt about how the path
+            parser reads a following relative moveto.
         -->
-        <Style x:Key="OverlayButton" TargetType="Button">
-            <Setter Property="Width" Value="28" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="Margin" Value="2,0" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="Foreground" Value="#FFE8E8E8" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Focusable" Value="False" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Chrome"
-                                CornerRadius="6"
-                                Background="{TemplateBinding Background}"
-                                Padding="0">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="#40FFFFFF" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="#66FFFFFF" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
+        <StreamGeometry x:Key="IconPrev">M 11.866 1.933 C 12.746 1.273 14 1.902 14 3 v 10.132 a 1.334 1.334 0 0 1 -2.089 1.099 L 4.863 9.385 a 1.333 1.333 0 0 1 -0.045 -2.165 z M 1.667 3.333 c 0.368 0 0.666 0.3 0.666 0.667 v 8 A 0.666 0.666 0 0 1 1 12 V 4 c 0 -0.368 0.299 -0.667 0.667 -0.667</StreamGeometry>
+        <StreamGeometry x:Key="IconNext">M 2 2.869 c 0 -1.074 1.204 -1.708 2.089 -1.1 l 7.048 4.846 c 0.751 0.516 0.774 1.618 0.045 2.166 l -7.048 5.286 C 3.254 14.726 2 14.099 2 13 z M 14.333 3.333 c 0.368 0 0.667 0.3 0.667 0.667 v 8 a 0.667 0.667 0 0 1 -1.333 0 V 4 c 0 -0.368 0.298 -0.666 0.666 -0.667</StreamGeometry>
+        <StreamGeometry x:Key="IconPlay">M 3.334 17.292 V 2.708 c 0 -1.472 1.684 -2.368 2.98 -1.585 L 17.84 8.098 a 1.834 1.834 0 0 1 0.065 3.128 l -11.528 7.61 c -1.29 0.851 -3.044 -0.038 -3.044 -1.544</StreamGeometry>
+        <StreamGeometry x:Key="IconPause">M 3.333 3.25 c 0 -0.7 0 -1.05 0.136 -1.317 a 1.25 1.25 0 0 1 0.547 -0.547 c 0.267 -0.136 0.617 -0.136 1.317 -0.136 h 0.583 c 0.7 0 1.05 0 1.318 0.136 c 0.235 0.12 0.426 0.311 0.546 0.547 c 0.136 0.267 0.136 0.617 0.136 1.317 v 13.5 c 0 0.7 0 1.05 -0.136 1.317 a 1.25 1.25 0 0 1 -0.546 0.547 c -0.268 0.136 -0.618 0.136 -1.318 0.136 h -0.583 c -0.7 0 -1.05 0 -1.317 -0.136 a 1.25 1.25 0 0 1 -0.547 -0.547 c -0.136 -0.267 -0.136 -0.617 -0.136 -1.317 z M 12.083 3.25 c 0 -0.7 0 -1.05 0.136 -1.317 a 1.25 1.25 0 0 1 0.547 -0.547 c 0.267 -0.136 0.617 -0.136 1.317 -0.136 h 0.583 c 0.7 0 1.05 0 1.318 0.136 c 0.235 0.12 0.426 0.311 0.546 0.547 c 0.136 0.267 0.136 0.617 0.136 1.317 v 13.5 c 0 0.7 0 1.05 -0.136 1.317 a 1.25 1.25 0 0 1 -0.546 0.547 c -0.268 0.136 -0.618 0.136 -1.318 0.136 h -0.583 c -0.7 0 -1.05 0 -1.318 -0.136 a 1.25 1.25 0 0 1 -0.546 -0.547 c -0.136 -0.267 -0.136 -0.617 -0.136 -1.317</StreamGeometry>
+
+        <!--
+            Reference proportions: a 30px hit area holding a 16px glyph for prev/next, a
+            44x30 pill holding an 18px glyph for play/pause, 10px between them. The
+            reference itself uses 32/48/20 inside a widget that is exactly one 32px row
+            tall; this strip is a taskbar-height band that also carries a progress row, so
+            the pill would be clipped at 32.
+        -->
+        <Style x:Key="TransportGlyphButton" TargetType="controls:TransportButton">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="IconSize" Value="16" />
+            <Setter Property="IconViewBox" Value="16" />
         </Style>
     </Window.Resources>
 
@@ -69,6 +57,20 @@
                 CornerRadius="5"
                 Background="#66000000"
                 BorderThickness="0" />
+
+        <!--
+            The reference's drag affordance: a 2x16 pill at the strip's leading edge,
+            revealed together with the transport controls. It sits in the outer margin
+            rather than inside the content grid, so it never takes width away from the
+            words, and it is not hit-testable — dragging is handled on the window itself.
+        -->
+        <Border x:Name="DragHandle"
+                Width="2" Height="16"
+                CornerRadius="1"
+                HorizontalAlignment="Left" VerticalAlignment="Center"
+                Margin="3,0,0,0"
+                Background="#1F000000"
+                IsHitTestVisible="False" />
 
         <Grid Margin="8,0,8,0">
             <Grid.ColumnDefinitions>
@@ -81,64 +83,158 @@
             </Grid.RowDefinitions>
 
             <!--
-              Transport controls plus song progress, shown only when enabled. Each
-              button is hit-testable, so a click here is handled by us rather than
-              passed through to the taskbar.
+              The hover cluster: the track's cover, title and artist beside the transport
+              controls. All of it appears under the pointer and leaves with it, so while the
+              pointer is away the strip holds nothing but the words.
+
+              The words are not confined to a column beside it: they span the whole band, so
+              with the pointer away they are simply centred in the strip, exactly as they
+              would be if the cluster did not exist. Each line clips itself to the space the
+              cluster is using for as long as it is on screen (see UpdateClusterInset), and is
+              carried into the middle of the room that is left by a render transform — a
+              transform rather than a layout change, because it never re-measures the text and
+              can therefore be animated per frame.
             -->
-            <StackPanel x:Name="TransportPanel"
+            <StackPanel x:Name="LeftCluster"
                         Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
-                        Orientation="Vertical"
+                        Panel.ZIndex="2"
+                        Orientation="Horizontal"
                         VerticalAlignment="Center"
-                        Margin="0,0,6,0"
-                        Visibility="Collapsed">
+                        Margin="0,0,6,0">
 
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                    <Button x:Name="PrevButton" Style="{StaticResource OverlayButton}"
-                            Content="⏮" Click="OnPrevClicked" ToolTip="上一首" />
-                    <Button x:Name="PlayPauseButton" Style="{StaticResource OverlayButton}"
-                            Content="⏯" Click="OnPlayPauseClicked" ToolTip="暂停 / 播放" />
-                    <Button x:Name="NextButton" Style="{StaticResource OverlayButton}"
-                            Content="⏭" Click="OnNextClicked" ToolTip="下一首" />
-                </StackPanel>
+                <!--
+                  Cover, title and artist. None of it is hit-testable: a click here has to
+                  reach the taskbar exactly as it does over the words themselves, so the
+                  cluster can never become a dead zone on the bar.
+                -->
+                <StackPanel x:Name="InfoPanel"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Margin="0,0,12,0"
+                            Visibility="Collapsed"
+                            IsHitTestVisible="False">
 
-                <!-- Song progress, directly beneath the transport buttons. -->
-                <Grid x:Name="ProgressSection" Margin="2,2,2,0">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <!-- Track + fill; the fill width is set from the render tick. -->
-                    <Border x:Name="ProgressTrack"
-                            Grid.Row="0"
-                            Height="3"
-                            CornerRadius="1.5"
-                            Background="#40FFFFFF"
-                            SizeChanged="OnProgressTrackSizeChanged">
-                        <Border x:Name="ProgressFill"
-                                HorizontalAlignment="Left"
-                                CornerRadius="1.5"
-                                Background="{StaticResource ProgressFillBrush}" />
+                    <!--
+                      Album art, painted as the border's own background so the rounded
+                      corner really does clip it — a Border clips its children to the
+                      square bounds, not to the corner radius. The placeholder holds the
+                      slot open for a player that publishes no art, so the words do not
+                      step sideways when one track's cover arrives and another's does not.
+                    -->
+                    <Border x:Name="CoverBox"
+                            Width="28" Height="28"
+                            CornerRadius="4"
+                            Background="#1F000000"
+                            VerticalAlignment="Center">
+                        <TextBlock x:Name="CoverPlaceholder"
+                                   Text="♪"
+                                   FontSize="13"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="#66FFFFFF" />
                     </Border>
 
-                    <TextBlock x:Name="ProgressText"
-                               Grid.Row="1"
-                               Margin="0,2,0,0"
-                               HorizontalAlignment="Center"
-                               FontSize="9"
-                               Foreground="{StaticResource ProgressTextBrush}"
-                               Text="--:-- / --:--" />
-                </Grid>
+                    <StackPanel Margin="8,0,0,0" VerticalAlignment="Center">
+                        <TextBlock x:Name="SongTitle"
+                                   FontSize="10.5"
+                                   FontWeight="SemiBold"
+                                   MaxWidth="104"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="#B3FFFFFF" />
+                        <TextBlock x:Name="SongArtist"
+                                   FontSize="9.5"
+                                   Margin="0,1,0,0"
+                                   MaxWidth="104"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="#80FFFFFF" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!--
+                  Transport controls plus song progress, shown only when enabled. Each
+                  button is hit-testable, so a click here is handled by us rather than
+                  passed through to the taskbar.
+                -->
+                <StackPanel x:Name="TransportPanel"
+                            Orientation="Vertical"
+                            VerticalAlignment="Center"
+                            Visibility="Collapsed">
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <controls:TransportButton x:Name="PrevButton"
+                                                  Style="{StaticResource TransportGlyphButton}"
+                                                  Margin="0,0,10,0"
+                                                  Icon="{StaticResource IconPrev}"
+                                                  Click="OnPrevClicked" ToolTip="上一首" />
+                        <!--
+                            The plate behind play/pause is a true circle, not the reference's
+                            48x32 stadium: its hover state was the thing the user pointed at
+                            ("the area that darkens when you hover it"), and the plate they
+                            sent as the target is a circle. Radius 15 on a 30x30 box is half
+                            the box in both axes, so WPF draws an ellipse - a circle.
+                        -->
+                        <controls:TransportButton x:Name="PlayPauseButton"
+                                                  Width="30" Height="30"
+                                                  IconSize="18" IconViewBox="20"
+                                                  PillCornerRadius="15"
+                                                  Icon="{StaticResource IconPause}"
+                                                  Click="OnPlayPauseClicked" ToolTip="暂停 / 播放" />
+                        <controls:TransportButton x:Name="NextButton"
+                                                  Style="{StaticResource TransportGlyphButton}"
+                                                  Margin="10,0,0,0"
+                                                  Icon="{StaticResource IconNext}"
+                                                  Click="OnNextClicked" ToolTip="下一首" />
+                    </StackPanel>
+
+                    <!--
+                        Song progress. The readout sits beside the track rather than under it:
+                        the band is taskbar height, and a second text row would push the pill
+                        into the clip rectangle.
+                    -->
+                    <Grid x:Name="ProgressSection" Margin="0,1,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Track + fill; the fill width is set from the render tick. -->
+                        <Border x:Name="ProgressTrack"
+                                Grid.Column="0"
+                                Height="3"
+                                VerticalAlignment="Center"
+                                CornerRadius="1.5"
+                                Background="#40FFFFFF"
+                                SizeChanged="OnProgressTrackSizeChanged">
+                            <Border x:Name="ProgressFill"
+                                    HorizontalAlignment="Left"
+                                    CornerRadius="1.5"
+                                    Background="{StaticResource ProgressFillBrush}" />
+                        </Border>
+
+                        <TextBlock x:Name="ProgressText"
+                                   Grid.Column="1"
+                                   Margin="6,0,0,0"
+                                   VerticalAlignment="Center"
+                                   FontSize="9"
+                                   Foreground="{StaticResource ProgressTextBrush}"
+                                   Text="--:-- / --:--" />
+                    </Grid>
+                </StackPanel>
             </StackPanel>
 
-            <!-- Current line: karaoke sweep + translation beneath it -->
+            <!--
+              Current line: karaoke sweep + translation beneath it. Both lines span the whole
+              band so that, with the pointer away, they are centred in the strip itself and no
+              inset is needed at all; while the hover cluster is on screen they are given the
+              room beside it through ContentInset, which lays the words out in that room rather
+              than sliding them under the cluster and cutting the front off the line.
+            -->
             <controls:KaraokeLine x:Name="CurrentLine"
-                                  Grid.Row="0" Grid.Column="1"
+                                  Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
                                   IsCurrent="True" />
 
             <!-- Upcoming line, dimmed, so the next phrase is predictable -->
             <controls:KaraokeLine x:Name="NextLine"
-                                  Grid.Row="1" Grid.Column="1"
+                                  Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
                                   IsCurrent="False"
                                   Opacity="0.75" />
         </Grid>

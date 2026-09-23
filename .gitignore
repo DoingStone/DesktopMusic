@@ -18,3 +18,11 @@ artifacts/
 *.binlog
 *.log
 TestResults/
+
+# Third-party typefaces are NOT redistributed with this repository: a typeface carries its
+# own licence, and the subset this option was developed against came out of another
+# application's install. Drop your own file in to enable the built-in font - see
+# src/TaskbarLyrics.App/Fonts/README.md. The build works fine without it.
+src/TaskbarLyrics.App/Fonts/*.ttf
+src/TaskbarLyrics.App/Fonts/*.otf
+src/TaskbarLyrics.App/Fonts/*.woff2

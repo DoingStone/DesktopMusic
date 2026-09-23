@@ -25,6 +25,18 @@ public interface IMediaSessionSource
 
     /// <summary>Skip to the previous track. False when unsupported.</summary>
     Task<bool> TrySkipPreviousAsync(CancellationToken ct);
+
+    /// <summary>
+    /// The active session's album art, as the encoded image bytes the player published,
+    /// or null when the session has none.
+    /// <para>
+    /// Deliberately separate from <see cref="GetCurrentAsync"/>: this is a WinRT round
+    /// trip that some players answer with a multi-megabyte image, so it is called when
+    /// the track changes rather than on every poll. A player that publishes no art is
+    /// normal, and answering null for it is not an error.
+    /// </para>
+    /// </summary>
+    Task<byte[]?> TryReadAlbumArtAsync(CancellationToken ct);
 }
 
 /// <summary>
@@ -32,18 +44,26 @@ public interface IMediaSessionSource
 /// </summary>
 public sealed class MediaSessionOptions
 {
-    /// <summary>App ids we prefer, in priority order.</summary>
-    public IReadOnlyList<string> PreferredSourceIds { get; init; } = new[]
-    {
-        "QQMusic.exe",
-    };
+    /// <summary>
+    /// App ids to prefer when several sessions are playing, in priority order.
+    /// <para>
+    /// Empty by default, deliberately. It used to default to QQ Music alone, and the
+    /// selection loop consulted it <i>before</i> the allow-list and without requiring the
+    /// session to be playing - so a paused, stale QQ Music session masked whatever was
+    /// actually being listened to. A preference is a tie-break, not a filter.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<string> PreferredSourceIds { get; init; } = Array.Empty<string>();
 
     /// <summary>
-    /// When set, only sessions whose app id matches one of these prefixes are
-    /// followed. Empty means "any session".
+    /// When set, only sessions whose app id contains one of these prefixes are followed.
+    /// Empty - the default - means any session.
+    /// <para>
+    /// This used to default to <c>"QQMusic"</c>, which made every other player invisible:
+    /// playing a song in NetEase Cloud Music produced no session at all as far as this app
+    /// was concerned, so the overlay stayed empty and the lyric pipeline was never even
+    /// consulted.
+    /// </para>
     /// </summary>
-    public IReadOnlyList<string> AllowedSourcePrefixes { get; init; } = new[]
-    {
-        "QQMusic",
-    };
+    public IReadOnlyList<string> AllowedSourcePrefixes { get; init; } = Array.Empty<string>();
 }
