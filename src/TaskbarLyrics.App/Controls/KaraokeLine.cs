@@ -99,6 +99,13 @@ public sealed class KaraokeLine : FrameworkElement
     /// <summary>Share of the font size that the sweep's leading edge fades across (P3).</summary>
     private const double HighlightFadeRatio = 0.45;
 
+    /// <summary>
+    /// Slack added to the highlight clip once the sweep reaches the end of the line, in DIP.
+    /// Glyph ink overshoots the advance width it was laid out with, so without it the last
+    /// character keeps a sub-pixel sliver of the unsung colour.
+    /// </summary>
+    private const double HighlightEndSlack = 2.0;
+
     private double _scrollOffset;
     private double _scrollHoldMs;
     private double _measuredTextWidth;
@@ -696,14 +703,26 @@ public sealed class KaraokeLine : FrameworkElement
             // --- highlight pass, clipped to the sung width -------------------
             if (sungWidth > 0.01)
             {
-                // The clip starts where the text does, so it follows the scroll.
-                var clip = new RectangleGeometry(new Rect(left, 0, sungWidth, ActualHeight));
+                // The clip starts where the text does, so it follows the scroll. At the end of
+                // the line it gets a hair of slack: the last glyph's ink can overshoot its own
+                // advance width, so a clip that stops exactly on the layout width leaves a
+                // sliver of that character unsung. Mid-line the clip must stop on the sweep
+                // edge, so the slack is end-only.
+                var complete = sungWidth >= main.Width - 0.5;
+                var clip = new RectangleGeometry(new Rect(
+                    left,
+                    0,
+                    complete ? sungWidth + HighlightEndSlack : sungWidth,
+                    ActualHeight));
 
                 // Soft leading edge (P3): the last fraction of a character fades in rather than
                 // ending on a hard vertical seam, so the sweep reads as a glow travelling through
                 // the line. The mask is absolute-mapped, i.e. in the same DIP space the text is
                 // drawn in, and padded either side, so everything behind the edge stays opaque.
-                var fade = Math.Min(FontSizeValue * HighlightFadeRatio, sungWidth);
+                // Only while the sweep is still travelling: once it has reached the end of the
+                // line there is no leading edge left to soften, and fading the tail would leave
+                // the final glyphs dimmer than the rest of the line.
+                var fade = complete ? 0.0 : Math.Min(FontSizeValue * HighlightFadeRatio, sungWidth);
                 if (fade > 0.5)
                 {
                     var mask = new LinearGradientBrush

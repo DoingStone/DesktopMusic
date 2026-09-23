@@ -210,7 +210,14 @@ internal static class SettingsSelfTest
                         if (x > maxInk) maxInk = x;
 
                         byte b = pixels[i], g = pixels[i + 1], r = pixels[i + 2];
-                        if (b > 150 && b > r + 40 && g > r)
+
+                        // "Highlighted" means any blue tint at all, not a saturated pixel. The
+                        // last column or two of a glyph is a faint anti-aliased edge, so a
+                        // threshold that demands saturation reports a fully sung line as one or
+                        // two pixels short of its own text. Over the white base a DeepSkyBlue
+                        // blend lifts blue above red by ~13 per 5% coverage, while an unsung
+                        // (white) or grey pixel has blue == red.
+                        if (b > r + 6)
                         {
                             if (x > maxHighlight) maxHighlight = x;
                         }
@@ -222,6 +229,9 @@ internal static class SettingsSelfTest
 
             // The extent comes from a fully-swept render, so the expectations depend on
             // neither the font's metrics nor where the centred text happens to sit.
+            // Two pixels of tolerance: the final column of a glyph is a sub-pixel anti-aliased
+            // ramp whose classification can differ between machines, while a genuine regression
+            // (a faded sweep tail, or no highlight pass at all) is far wider than that.
             var (fStart, fBoundary, fEnd) = Render(1.0);
             Check("fully swept: highlight covers the whole line",
                 fBoundary >= fEnd - 2 && fEnd - fStart > 40,
