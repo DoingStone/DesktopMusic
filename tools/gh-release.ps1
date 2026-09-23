@@ -92,9 +92,11 @@ foreach ($a in $Asset) {
             Invoke-GhApi DELETE "https://api.github.com/repos/$repo/releases/assets/$($ra.id)" | Out-Null
         }
     }
-    $bytes = [System.IO.File]::ReadAllBytes($path)
-    Write-Host ("uploading {0} ({1} MB)..." -f $fileName, [math]::Round($bytes.Length / 1MB, 2))
-    $resp = Invoke-GhApi POST "https://uploads.github.com/repos/$repo/releases/$($rel.id)/assets?name=$fileName" -Body $bytes -ContentType 'application/zip' -Raw
+    $sizeMb = [math]::Round((Get-Item -LiteralPath $path).Length / 1MB, 2)
+    Write-Host ("uploading {0} ({1} MB)..." -f $fileName, $sizeMb)
+    # -InFile, never -Body <byte[]>: Windows PowerShell 5.1 stringifies a byte[] body and
+    # uploads a corrupted asset (7.56 MB arrived as 27.23 MB).
+    $resp = Invoke-GhApi POST "https://uploads.github.com/repos/$repo/releases/$($rel.id)/assets?name=$fileName" -InFile $path -ContentType 'application/zip' -Raw
     $asset = $resp.Content | ConvertFrom-Json
     Write-Host ("  asset  : {0}  {1} MB  state={2}" -f $asset.name, [math]::Round($asset.size / 1MB, 2), $asset.state)
     Write-Host ("  url    : {0}" -f $asset.browser_download_url)

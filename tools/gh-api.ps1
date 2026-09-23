@@ -6,6 +6,11 @@
 #
 #   . .\tools\gh-api.ps1
 #   Invoke-GhApi GET 'https://api.github.com/repos/DoingStone/DesktopMusic/releases'
+#
+# Bodies are always sent from a temporary file via -InFile. Windows PowerShell 5.1
+# mangles a byte[] -Body: a 7.56 MB ZIP uploaded as 27.23 MB of garbage (the array got
+# stringified), and the same path made the create-release call come back 422
+# ("For 'links/0/schema', 123 is not an object"). -InFile streams the file as-is.
 
 Add-Type @"
 using System; using System.Runtime.InteropServices;
@@ -54,28 +59,49 @@ function Get-GhHeaders {
     }
 }
 
-# Invoke-GhApi <method> <uri> [-Body <object>] [-Raw]
-# JSON bodies are serialised as UTF-8; -Raw returns the WebResponse so callers can
-# read upload progress / headers (used by the release asset upload).
+# Invoke-GhApi <method> <uri> [-Body <object|byte[]>] [-InFile <path>] [-Raw]
+# JSON bodies are serialised as UTF-8 without a BOM; -InFile streams a file verbatim
+# (release asset uploads). -Raw returns the WebResponse so callers can read upload
+# progress / headers.
 function Invoke-GhApi {
     param(
         [Parameter(Mandatory)][string]$Method,
         [Parameter(Mandatory)][string]$Uri,
         [Parameter()]$Body,
+        [Parameter()][string]$InFile,
         [Parameter()][switch]$Raw,
         [Parameter()][string]$ContentType = 'application/json; charset=utf-8',
         [Parameter()][int]$TimeoutSec = 600
     )
 
     $headers = Get-GhHeaders
-    if ($null -ne $Body) {
-        $headers['Content-Type'] = $ContentType
-        $bytes = if ($Body -is [byte[]]) { $Body } else { [System.Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Depth 12 -Compress)) }
-    }
+    # .NET honours the WinINET system proxy by default. On this machine that points at a
+    # local proxy port which cannot reach github.com, so the REST calls must go direct:
+    # api.github.com answers fine without it (curl works, the system proxy does not).
+    [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy
 
     $params = @{ Method = $Method; Uri = $Uri; Headers = $headers; UseBasicParsing = $true; TimeoutSec = $TimeoutSec }
-    if ($null -ne $Body) { $params.Body = $bytes }
-    $resp = Invoke-WebRequest @params
+    $tempFile = $null
+    if ($InFile) {
+        $headers['Content-Type'] = $ContentType
+        $params.InFile = $InFile
+    } elseif ($null -ne $Body) {
+        $headers['Content-Type'] = $ContentType
+        $tempFile = [System.IO.Path]::GetTempFileName()
+        if ($Body -is [byte[]]) {
+            [System.IO.File]::WriteAllBytes($tempFile, $Body)
+        } else {
+            $json = ($Body | ConvertTo-Json -Depth 12 -Compress)
+            [System.IO.File]::WriteAllText($tempFile, $json, (New-Object System.Text.UTF8Encoding($false)))
+        }
+        $params.InFile = $tempFile
+    }
+
+    try {
+        $resp = Invoke-WebRequest @params
+    } finally {
+        if ($tempFile) { Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue }
+    }
 
     $script:GhScopes = $resp.Headers['x-oauth-scopes']
     if ($Raw) { return $resp }
